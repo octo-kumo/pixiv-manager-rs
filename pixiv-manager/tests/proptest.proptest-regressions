@@ -1,0 +1,8 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc f49fc1efdf7745a40afe441afdc0fe09976f018feaf987b0237f292759ab15c1 # shrinks to dir = Undefined
+cc f1206549bbe843c9235fbc5f3fa0a19ae539c97f0b27707d8f1b8490888f8553 # shrinks to ids = [6725], r18 = Indeterminate, ai = Deselected, bm = Deselected, land = Indeterminate, vis = Indeterminate, rest = Deselected, miss = Deselected, tags = [], extra_key = Ai

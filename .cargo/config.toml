@@ -1,0 +1,4 @@
+[alias]
+b = "build"
+t = "test"
+cl = "clippy"

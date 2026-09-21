@@ -1,0 +1,69 @@
+[package]
+name = "pixiv-manager"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "pixiv_manager"
+path = "src/lib.rs"
+
+[features]
+# Shared test fixtures for the bench and proptest suites.
+test-util = []
+# Profiling telemetry: global tracer, tagged allocator, pprof sampling and
+# the `profiler` example. Compiled out entirely when not enabled.
+profiling = ["dep:pprof", "pixivj-rs/profiling"]
+
+[[bin]]
+name = "pixiv-manager"
+path = "src/main.rs"
+
+[[bin]]
+name = "pixiv-manager-cli"
+path = "src/cli/main.rs"
+
+[[example]]
+name = "profiler"
+path = "examples/profiler.rs"
+required-features = ["profiling"]
+
+[dependencies]
+pixivj-rs = { path = "../pixivj-rs" }
+iced = { workspace = true }
+rfd = "0.17"
+fast_image_resize = "6"
+open = "5"
+tokio = { workspace = true }
+reqwest = { workspace = true }
+thiserror = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+clap = { workspace = true }
+image = { workspace = true }
+chrono = { workspace = true }
+lru = "0.18"
+sha2 = "0.11"
+base64 = "0.23"
+md-5 = "0.11"
+rand = "0.10"
+dirs = "6"
+toml = "1"
+log = "0.4"
+env_logger = "0.11"
+# Profiling only (feature = "profiling"): CPU sampling + flamegraph output.
+pprof = { version = "0.15", features = ["flamegraph"], optional = true }
+
+[dev-dependencies]
+proptest = { workspace = true }
+criterion = { workspace = true }
+tempfile = "3"
+assert_cmd = "2"
+predicates = "3"
+iced_test = "0.14"
+# Enable the shared test fixtures for the integration test suites.
+pixiv-manager = { path = ".", features = ["test-util"] }
+
+[[bench]]
+name = "filter_sort"
+harness = false
+required-features = ["test-util"]

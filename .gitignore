@@ -1,0 +1,8 @@
+/target
+/Cargo.lock
+*.swp
+.DS_Store
+*.token
+.env
+**/tokens.json
+*_cookies.txt
