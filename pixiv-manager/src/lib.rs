@@ -1,7 +1,12 @@
+// The wgpu resource graph (BindGroup → hub → registry) is deep; trait
+// solving for the shader widget's Pipeline: MaybeSync needs the headroom.
+#![recursion_limit = "256"]
+
 pub mod app;
 pub mod bilibili;
 pub mod cli;
 pub mod core;
+pub mod frame;
 pub mod image;
 pub mod io;
 pub mod media;

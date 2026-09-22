@@ -33,7 +33,6 @@ pub fn gallery<'a>(
     restore_offset: f32,
     dim_bookmarked: bool,
     blur_r18: bool,
-    hovered: &'a std::collections::HashSet<u64>,
 ) -> iced::Element<'a, Message> {
     if illusts.is_empty() {
         return iced::widget::container(iced::widget::text("No illustrations").size(16))
@@ -82,7 +81,6 @@ pub fn gallery<'a>(
                 tile_text,
                 dim_bookmarked,
                 blur_r18,
-                hovered.contains(&illust.id),
             ));
         }
         // No spacing between tiles — images touch, like the original app.
@@ -161,7 +159,6 @@ mod tests {
         let map = HashMap::new();
         let avg = HashMap::new();
         let downloaded = std::collections::HashSet::new();
-        let hovered = std::collections::HashSet::new();
         let downloads = crate::io::download::DownloadTracker::default();
         let el = gallery(
             &[],
@@ -180,7 +177,6 @@ mod tests {
             0.0,
             false,
             false,
-            &hovered,
         );
         drop(el);
     }

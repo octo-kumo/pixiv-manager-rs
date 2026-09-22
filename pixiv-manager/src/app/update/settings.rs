@@ -194,6 +194,13 @@ pub(super) fn handle(state: &mut AppState, message: Message) -> iced::Task<Messa
             schedule_config_flush()
         }
 
+        Message::FpsLimitChanged(fps) => {
+            state.settings.fps_limit = fps.min(1000);
+            crate::frame::set_limit(state.settings.fps_limit);
+            mark_config_dirty(state);
+            schedule_config_flush()
+        }
+
         Message::MemoryPresetChanged(preset) => {
             state.settings.memory_preset = preset;
             mark_config_dirty(state);
@@ -377,6 +384,10 @@ pub(super) fn handle(state: &mut AppState, message: Message) -> iced::Task<Messa
                     state.settings.memory_preset,
                 ));
             }
+            if key == crate::app::state::SettingsKey::FpsLimit {
+                crate::frame::set_limit(state.settings.fps_limit);
+                return schedule_config_flush();
+            }
             schedule_config_flush()
         }
 
@@ -393,9 +404,10 @@ pub(super) fn handle(state: &mut AppState, message: Message) -> iced::Task<Messa
             // them when their files are gone.
             state.bilibili.users_pending.clear();
             state.bilibili.user_ids_input = String::new();
-            // Re-seed the bookmarked filters and rebuild the caches at the
-            // (reset) preset's budgets.
+            // Re-seed the bookmarked filters, reset the frame limit and
+            // rebuild the caches at the (reset) preset's budgets.
             super::gallery::apply_bookmark_filter_defaults(state);
+            crate::frame::set_limit(state.settings.fps_limit);
             let budget = crate::image::cache::DEFAULT_MEMORY_BUDGET
                 * state.settings.memory_preset.cache_budget_multiplier();
             state.images.image_cache = Arc::new(crate::image::cache::ImageCache::new(

@@ -21,7 +21,6 @@ pub fn artist_page<'a>(
     parallax: crate::widgets::parallax_image::ParallaxOptions,
     dim_bookmarked: bool,
     blur_r18: bool,
-    hovered: &'a std::collections::HashSet<u64>,
 ) -> iced::Element<'a, Message> {
     // ── Header: profile picture + name + account ──
     let mut header_children: Vec<iced::Element<'a, Message>> = Vec::new();
@@ -77,7 +76,6 @@ pub fn artist_page<'a>(
         parallax,
         dim_bookmarked,
         blur_r18,
-        hovered,
     );
 
     let content = iced::widget::column![header, gallery];
@@ -113,7 +111,6 @@ fn build_gallery<'a>(
     parallax: crate::widgets::parallax_image::ParallaxOptions,
     dim_bookmarked: bool,
     blur_r18: bool,
-    hovered: &'a std::collections::HashSet<u64>,
 ) -> iced::Element<'a, Message> {
     if illusts.is_empty() {
         let label = if loading {
@@ -157,7 +154,6 @@ fn build_gallery<'a>(
                 tile_text,
                 dim_bookmarked,
                 blur_r18,
-                hovered.contains(&illust.id),
             ));
         }
         rows.push(iced::widget::Row::with_children(row_elems).into());
@@ -187,7 +183,6 @@ mod tests {
     fn test_artist_empty() {
         let map = HashMap::new();
         let avg = HashMap::new();
-        let hovered = std::collections::HashSet::new();
         let downloads = crate::io::download::DownloadTracker::default();
         let el = artist_page(
             None,
@@ -203,7 +198,6 @@ mod tests {
             crate::widgets::parallax_image::ParallaxOptions::ALL,
             false,
             false,
-            &hovered,
         );
         drop(el);
     }
@@ -212,7 +206,6 @@ mod tests {
     fn test_artist_builds() {
         let map = HashMap::new();
         let avg = HashMap::new();
-        let hovered = std::collections::HashSet::new();
         let downloads = crate::io::download::DownloadTracker::default();
         let el = artist_page(
             None,
@@ -228,7 +221,6 @@ mod tests {
             crate::widgets::parallax_image::ParallaxOptions::ALL,
             false,
             false,
-            &hovered,
         );
         drop(el);
     }
@@ -239,7 +231,6 @@ mod tests {
         // (the old hardcoded 160px layout ignored the setting entirely).
         let map = HashMap::new();
         let avg = HashMap::new();
-        let hovered = std::collections::HashSet::new();
         let downloads = crate::io::download::DownloadTracker::default();
         let illusts: Vec<Illustration> = (1..=40).map(crate::test_util::mock_illust).collect();
         // Small tiles (80px min) on a 1600px page → 12 columns (capped).
@@ -257,7 +248,6 @@ mod tests {
             crate::widgets::parallax_image::ParallaxOptions::ALL,
             false,
             false,
-            &hovered,
         );
         drop(el);
         // Large tiles (400px min) → 4 columns.
@@ -275,7 +265,6 @@ mod tests {
             crate::widgets::parallax_image::ParallaxOptions::ALL,
             false,
             false,
-            &hovered,
         );
         drop(el);
     }

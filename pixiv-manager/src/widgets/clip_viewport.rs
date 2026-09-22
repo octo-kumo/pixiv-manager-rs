@@ -139,12 +139,19 @@ where
     ) {
         let content_layout = layout.children().next().expect("clip viewport child");
         let bounds = content_layout.bounds();
-        // Skip degenerate cells (a collapsed tile mid-resize): a zero-area
-        // clip layer can panic the wgpu backend.
-        if bounds.width <= 0.0 || bounds.height <= 0.0 {
+        // The clip layer must ALSO respect the parent's clip region (the
+        // forwarded viewport): iced's layer scissor is the layer's OWN
+        // bounds only, so without this intersection a tile whose translated
+        // position drifts outside the gallery's region (during the scroll
+        // glide, when the tree offset diverges from the last view rebuild)
+        // paints over the tab bar and every overlay above it.
+        //
+        // This also skips degenerate cells (a collapsed tile mid-resize):
+        // a zero-area clip layer can panic the wgpu backend.
+        let Some(clipped) = bounds.intersection(viewport) else {
             return;
-        }
-        renderer.with_layer(bounds, |renderer| {
+        };
+        renderer.with_layer(clipped, |renderer| {
             self.content.as_widget().draw(
                 &tree.children[0],
                 renderer,

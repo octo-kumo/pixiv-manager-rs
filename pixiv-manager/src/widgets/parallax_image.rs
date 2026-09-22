@@ -267,12 +267,12 @@ where
         match event {
             Event::Mouse(mouse::Event::CursorMoved { .. }) => {
                 self.update_target(state, &bounds, cursor);
-                shell.request_redraw();
+                crate::frame::request_redraw_gated(shell);
             }
             Event::Mouse(mouse::Event::CursorLeft) => {
                 // Cursor left the window — drift back to the rest position.
                 self.update_target(state, &bounds, mouse::Cursor::Unavailable);
-                shell.request_redraw();
+                crate::frame::request_redraw_gated(shell);
             }
             Event::Window(iced::window::Event::RedrawRequested(_)) => {
                 // Only the mouse parallax animates; the scroll (rest) parallax
@@ -283,7 +283,7 @@ where
                 state.x += (tx - state.x) * SPRING_DECAY;
                 state.y += (ty - state.y) * SPRING_DECAY;
                 if (state.x - tx).abs() > SPRING_EPSILON || (state.y - ty).abs() > SPRING_EPSILON {
-                    shell.request_redraw();
+                    crate::frame::request_redraw_gated(shell);
                 } else {
                     state.x = tx;
                     state.y = ty;
@@ -304,11 +304,11 @@ where
         viewport: &Rectangle,
     ) {
         let bounds = layout.bounds();
+        let state = tree.state.downcast_ref::<ParallaxState>();
         // Resize/transient guards: a zero-area cell or viewport (a window
         // being resized to a degenerate size, or a layer clipping its child
         // out entirely) must not reach the renderer — a zero or NaN-sized
-        // layer/quad can panic the wgpu backend (the reported "random crash
-        // on resize with parallax disabled").
+        // layer/quad can panic the wgpu backend.
         if bounds.width <= 0.0
             || bounds.height <= 0.0
             || viewport.width <= 0.0
@@ -316,7 +316,6 @@ where
         {
             return;
         }
-        let state = tree.state.downcast_ref::<ParallaxState>();
 
         let Some(image_size) = renderer.measure_image(&self.handle) else {
             return;

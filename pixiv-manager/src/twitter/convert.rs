@@ -174,14 +174,39 @@ fn parse_date(raw: &str) -> Option<chrono::DateTime<chrono::Utc>> {
         .map(|d| d.with_timezone(&chrono::Utc))
 }
 
+/// The tweet's author's **native** user id (used to keep only the user's
+/// own tweets on the author page — retweets resolve to the original author,
+/// which would otherwise show other people's art).
+pub fn tweet_native_user_id(tweet: &Value) -> Option<u64> {
+    let result = tweet.pointer("/core/user_results/result")?;
+    result
+        .get("rest_id")
+        .and_then(Value::as_str)
+        .and_then(|s| s.parse().ok())
+}
+
+/// Whether a timeline tweet node is a promoted one (an ad): promotion
+/// metadata rides at the result level or on the entry's itemContent.
+pub fn is_promoted(entry: &Value, tweet: &Value) -> bool {
+    if tweet.get("promoted_metadata").is_some() {
+        return true;
+    }
+    entry
+        .pointer("/content/itemContent/promotedMetadata")
+        .is_some()
+        || entry.pointer("/content/item/promotedMetadata").is_some()
+        || entry.pointer("/content/promotedMetadata").is_some()
+}
+
 /// The tweet author as the app's [`Author`] (ids namespaced like tweets).
 fn tweet_author(tweet: &Value) -> Option<Author> {
     let result = tweet.pointer("/core/user_results/result")?;
-    let id = result
-        .get("rest_id")
-        .and_then(Value::as_str)
-        .and_then(|s| s.parse::<u64>().ok())
-        .or_else(|| result.get("id").and_then(Value::as_str)?.parse().ok())?;
+    let id = tweet_native_user_id(tweet).or_else(|| {
+        result
+            .get("id")
+            .and_then(Value::as_str)
+            .and_then(|s| s.parse().ok())
+    })?;
     let name = result
         .pointer("/core/name")
         .or_else(|| result.pointer("/legacy/name"))

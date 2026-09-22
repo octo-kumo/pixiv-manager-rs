@@ -196,6 +196,7 @@ pub fn message_name(message: &Message) -> &'static str {
         BookmarkedDisplayChanged(_) => "BookmarkedDisplayChanged",
         BlurR18Changed(_) => "BlurR18Changed",
         MemoryPresetChanged(_) => "MemoryPresetChanged",
+        FpsLimitChanged(_) => "FpsLimitChanged",
         ToggleHelp => "ToggleHelp",
         ThumbnailHighResChanged(_) => "ThumbnailHighResChanged",
         ResetSetting(_) => "ResetSetting",
@@ -207,7 +208,6 @@ pub fn message_name(message: &Message) -> &'static str {
         TwitterArtistLoaded(..) => "TwitterArtistLoaded",
         BilibiliArtistLoaded(..) => "BilibiliArtistLoaded",
         SourceFilterToggled(_) => "SourceFilterToggled",
-        GalleryItemHover(..) => "GalleryItemHover",
         Noop => "Noop",
         FlushDisk => "FlushDisk",
     }

@@ -206,11 +206,22 @@ pub fn illust_info(illust: &Illustration, text: TileText) -> iced::Element<'_, M
     ]
     .spacing(4);
 
+    // Row visibility is user-configurable (Settings → tile info rows).
+    // NOTE: this must be a conditional push chain, NOT a plain `column![]` —
+    // the row flags come from the settings and every combination must render.
     let mut info = iced::widget::Column::<Message>::new().spacing(2);
-    info = info.push(author);
-    info = info.push(counts);
-    info = info.push(meta_row);
-    info = info.push(badge_row);
+    if text.rows.author {
+        info = info.push(author);
+    }
+    if text.rows.counts {
+        info = info.push(counts);
+    }
+    if text.rows.meta {
+        info = info.push(meta_row);
+    }
+    if text.rows.badges {
+        info = info.push(badge_row);
+    }
 
     // "Background" style: put the whole info block on a translucent strip.
     if text.style == GalleryTextStyle::Background {

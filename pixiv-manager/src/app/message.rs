@@ -283,9 +283,6 @@ pub enum Message {
     // ── Gallery interactions ───────────────────────────────────────
     GalleryItemClicked(u64),
     GalleryItemDoubleClicked(u64),
-    /// A gallery tile gained/lost the cursor (drives the R-18 blur's
-    /// un-blur-on-hover).
-    GalleryItemHover(u64, bool),
 
     // ── Image loading ─────────────────────────────────────────────
     /// Thumbnail bytes loaded for an illust `(id, url, target, result)`. The
@@ -402,6 +399,8 @@ pub enum Message {
     TileRowsChanged(crate::app::state::TileRowKey, bool),
     /// The memory/quality preset changed (cache budgets).
     MemoryPresetChanged(crate::app::state::MemoryPreset),
+    /// The animation frame-rate limit changed (`0` = uncapped).
+    FpsLimitChanged(u32),
     /// Viewer preload-ahead page count changed.
     AutoPreloadChanged(u32),
     /// Download-all concurrency changed.

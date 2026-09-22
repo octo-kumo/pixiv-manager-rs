@@ -443,6 +443,8 @@ pub enum SettingsKey {
     BlurR18,
     /// The memory/quality preset (cache budgets).
     MemoryPreset,
+    /// The animation frame-rate limit (0 = uncapped).
+    FpsLimit,
     /// High-resolution thumbnails (uses the 1200px source).
     ThumbnailHighRes,
     /// Path to the Twitter cookies file.
@@ -503,6 +505,11 @@ pub struct Settings {
     /// The memory/quality preset: cache budgets and retention behavior.
     #[serde(default)]
     pub memory_preset: MemoryPreset,
+    /// The animation frame-rate limit in fps (0 = uncapped). Caps the
+    /// continuous animation redraws (parallax, gallery glide, blur
+    /// transitions); event-driven redraws are never throttled.
+    #[serde(default)]
+    pub fps_limit: u32,
     /// Generate thumbnails at a higher resolution (uses the 1200px `large`
     /// source and a larger target), so tiles stay sharp at bigger grids and
     /// hi-DPI displays at the cost of more memory/bandwidth.
@@ -565,6 +572,7 @@ impl Settings {
             }
             SettingsKey::BlurR18 => self.blur_r18 = false,
             SettingsKey::MemoryPreset => self.memory_preset = MemoryPreset::default(),
+            SettingsKey::FpsLimit => self.fps_limit = 0,
             SettingsKey::ThumbnailHighRes => self.high_res_thumbnails = false,
             SettingsKey::TwitterCookies => self.twitter_cookie_path = None,
             SettingsKey::BilibiliCookies => self.bilibili_cookie_path = None,
@@ -601,6 +609,7 @@ impl Settings {
             SettingsKey::BookmarkedDisplay => self.bookmarked_display == probe.bookmarked_display,
             SettingsKey::BlurR18 => self.blur_r18 == probe.blur_r18,
             SettingsKey::MemoryPreset => self.memory_preset == probe.memory_preset,
+            SettingsKey::FpsLimit => self.fps_limit == probe.fps_limit,
             SettingsKey::ThumbnailHighRes => self.high_res_thumbnails == probe.high_res_thumbnails,
             SettingsKey::TwitterCookies => self.twitter_cookie_path == probe.twitter_cookie_path,
             SettingsKey::BilibiliCookies => self.bilibili_cookie_path == probe.bilibili_cookie_path,
@@ -629,6 +638,7 @@ impl Default for Settings {
             bookmarked_display: BookmarkedDisplay::default(),
             blur_r18: false,
             memory_preset: MemoryPreset::default(),
+            fps_limit: 0,
             high_res_thumbnails: false,
             twitter_cookie_path: None,
             bilibili_cookie_path: None,
@@ -973,9 +983,6 @@ pub struct AppState {
     /// Whether the help screen is open (the "?" button / usage + hotkeys +
     /// author + license page).
     pub show_help: bool,
-    /// Gallery tiles currently hovered (drives the R-18 blur un-blur-on-hover
-    /// behavior). Only populated when the blur option is on.
-    pub hovered_tiles: std::collections::HashSet<u64>,
     /// Whether the tag-filter text input is focused (the tag-suggestion
     /// dropdown is shown only while it is).
     pub tag_input_focused: bool,

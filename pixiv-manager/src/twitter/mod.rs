@@ -250,6 +250,8 @@ impl TwitterApiClient {
     }
 
     /// One page of a user's own tweets (the author page, photo tweets only).
+    /// Retweets resolve to the original author — they are dropped here so
+    /// the page shows only this user's own art.
     pub async fn user_tweets(
         &self,
         native_user_id: u64,
@@ -270,7 +272,27 @@ impl TwitterApiClient {
             )
             .await?;
         let entries = convert::user_tweets_entries(&root);
-        Ok(page_from_entries(&entries))
+        let mut items = Vec::new();
+        let mut seen = std::collections::HashSet::new();
+        for entry in &entries {
+            for tweet in convert::entry_tweets(entry) {
+                if convert::is_promoted(entry, tweet)
+                    || convert::tweet_native_user_id(tweet) != Some(native_user_id)
+                {
+                    continue;
+                }
+                let Some(illust) = convert::tweet_to_illust(tweet) else {
+                    continue;
+                };
+                if seen.insert(illust.id) {
+                    items.push(illust);
+                }
+            }
+        }
+        Ok(TwitterPage {
+            items,
+            next_cursor: convert::next_cursor(&entries),
+        })
     }
 
     /// A single tweet by native id.
@@ -299,6 +321,7 @@ impl TwitterApiClient {
     }
 
     /// One page of replies to a tweet (the focal tweet itself is excluded).
+    /// Promoted tweets (ads) are dropped.
     pub async fn replies(
         &self,
         native_tweet_id: u64,
@@ -313,7 +336,7 @@ impl TwitterApiClient {
                     "referrer": "tweet",
                     "with_rux_injections": false,
                     "rankingMode": "Relevance",
-                    "includePromotedContent": true,
+                    "includePromotedContent": false,
                     "withCommunity": true,
                     "withQuickPromoteEligibilityTweetFields": true,
                     "withBirdwatchNotes": true,
@@ -326,6 +349,9 @@ impl TwitterApiClient {
         let mut seen = std::collections::HashSet::new();
         for entry in &entries {
             for tweet in convert::entry_tweets(entry) {
+                if convert::is_promoted(entry, tweet) {
+                    continue;
+                }
                 let Some(comment) = convert::tweet_to_comment(tweet) else {
                     continue;
                 };
@@ -461,12 +487,16 @@ fn graphql_message(value: &Value) -> Option<String> {
         .map(str::to_string)
 }
 
-/// Convert entries into a page (photo-only, de-duplicated, order preserved).
+/// Convert entries into a page (photo-only, de-duplicated, order preserved,
+/// ads dropped).
 fn page_from_entries(entries: &[&Value]) -> TwitterPage {
     let mut items = Vec::new();
     let mut seen = std::collections::HashSet::new();
     for entry in entries {
         for tweet in convert::entry_tweets(entry) {
+            if convert::is_promoted(entry, tweet) {
+                continue;
+            }
             let Some(illust) = convert::tweet_to_illust(tweet) else {
                 continue;
             };

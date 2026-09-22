@@ -345,6 +345,30 @@ pub fn settings_screen(state: &AppState) -> iced::Element<'_, Message> {
         state,
     ));
 
+    // ── FPS limit ──────────────────────────────────────────────────
+    let limit = state.settings.fps_limit;
+    let limit_btn = |label: &'static str, value: u32| {
+        mode_btn(label, limit == value, move || {
+            Message::FpsLimitChanged(value)
+        })
+    };
+    rows.push(setting_row(
+        "Animation FPS limit",
+        iced::widget::row![
+            limit_btn("Off", 0),
+            limit_btn("30", 30),
+            limit_btn("60", 60),
+            limit_btn("120", 120),
+            limit_btn("240", 240),
+            iced::widget::text("Caps the animation loops; input and loads stay instant.").size(10),
+        ]
+        .spacing(4)
+        .align_y(iced::Alignment::Center)
+        .into(),
+        Some(SettingsKey::FpsLimit),
+        state,
+    ));
+
     // ── Parallax ───────────────────────────────────────────────────
     let mode = state.settings.parallax_mode;
     let mode_row = iced::widget::row![

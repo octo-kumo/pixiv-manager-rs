@@ -134,17 +134,24 @@ pub fn illust_detail<'a>(
             iced::widget::tooltip::Position::Top,
         ),
         download,
-        icon_action("⧉", copy_tip, Message::CopyIllustUrl(illust.id)),
+        icon_action(
+            "⧉",
+            copy_tip,
+            Some(Message::CopyIllustUrl(illust.id)),
+            false
+        ),
     ]
     .spacing(4)
     .align_y(iced::Alignment::Center);
-    if on_disk {
-        action_row = action_row.push(icon_action(
-            "📂",
-            "Open download folder",
-            Message::RevealIllustFiles(illust.id),
-        ));
-    }
+    // Open-folder action: always visible; a no-op (dimmed) until the work
+    // exists on disk. ("▤" over the emoji folder glyph, which some system
+    // fonts don't carry.)
+    action_row = action_row.push(icon_action(
+        "▤",
+        "Open download folder",
+        on_disk.then_some(Message::RevealIllustFiles(illust.id)),
+        !on_disk,
+    ));
 
     rows.push(action_row.into());
 
@@ -289,20 +296,34 @@ pub fn illust_detail<'a>(
 }
 
 /// A compact icon-only action button (used for copy-URL / open-folder).
+/// The glyph is centered by shrinking the button to its content with equal
+/// horizontal padding on both sides (the fixed asymmetric padding made the
+/// copy icon sit off-center, and the fixed width left dead space on the
+/// download button's right).
 fn icon_action(
     glyph: &'static str,
     tooltip: &'static str,
-    msg: Message,
+    msg: Option<Message>,
+    disabled: bool,
 ) -> iced::Element<'static, Message> {
-    iced::widget::tooltip(
-        iced::widget::button(iced::widget::text(glyph).size(13))
-            .on_press(msg)
-            .height(26)
-            .padding(iced::Padding::from([2, 8])),
-        tooltip,
-        iced::widget::tooltip::Position::Top,
+    let mut btn = iced::widget::button(
+        iced::widget::container(iced::widget::text(glyph).size(13))
+            .center_x(iced::Length::Shrink)
+            .center_y(iced::Length::Shrink),
     )
-    .into()
+    .height(26)
+    .width(iced::Length::Shrink)
+    .padding(iced::Padding::from([2, 7]));
+    if let Some(msg) = msg {
+        btn = btn.on_press(msg);
+    }
+    if disabled {
+        btn = btn.style(|theme, _| iced::widget::button::Style {
+            text_color: theme::muted(theme),
+            ..Default::default()
+        });
+    }
+    iced::widget::tooltip(btn, tooltip, iced::widget::tooltip::Position::Top).into()
 }
 
 /// Cap text at `max` chars, appending an ellipsis when truncated.

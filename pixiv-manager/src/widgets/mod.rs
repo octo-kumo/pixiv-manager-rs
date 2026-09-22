@@ -1,4 +1,5 @@
 pub mod artist;
+pub mod blur_image;
 pub mod clip_viewport;
 pub mod comments;
 pub mod control_pane;

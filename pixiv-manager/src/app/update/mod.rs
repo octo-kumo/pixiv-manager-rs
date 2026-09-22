@@ -80,6 +80,8 @@ pub fn boot() -> (AppState, iced::Task<Message>) {
     ));
     // The "hide bookmarked" option seeds every tab's Bookmarked tristate.
     gallery::apply_bookmark_filter_defaults(&mut state);
+    // Apply the configured animation frame-rate limit.
+    crate::frame::set_limit(state.settings.fps_limit);
     // Wire the configured proxy into the shared image-CDN client (stored in
     // state so tests can substitute it).
     state.images.fetcher.http = Arc::new(build_image_http_client(state.settings.proxy.as_deref()));
@@ -1021,7 +1023,6 @@ pub fn update(state: &mut AppState, message: Message) -> iced::Task<Message> {
         | Message::FullImageLoaded(..)
         | Message::GalleryItemClicked(_)
         | Message::GalleryItemDoubleClicked(_)
-        | Message::GalleryItemHover(..)
         | Message::ViewerOpened(_)
         | Message::ViewerClosed
         | Message::EscapePressed
@@ -1121,6 +1122,7 @@ pub fn update(state: &mut AppState, message: Message) -> iced::Task<Message> {
         | Message::BookmarkedDisplayChanged(_)
         | Message::BlurR18Changed(_)
         | Message::MemoryPresetChanged(_)
+        | Message::FpsLimitChanged(_)
         | Message::ThumbnailHighResChanged(_)
         | Message::ToggleHelp
         | Message::ResetSetting(_)

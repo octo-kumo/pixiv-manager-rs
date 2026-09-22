@@ -335,7 +335,7 @@ impl Widget<Message, iced::Theme, iced::Renderer> for VirtualGallery<'_> {
                 // the rendered offset catches up smoothly.
                 self.report(shell, state.target, bounds.height);
                 state.last_emitted = state.target;
-                shell.request_redraw();
+                crate::frame::request_redraw_gated(shell);
                 shell.capture_event();
             }
             Event::Mouse(mouse::Event::ButtonPressed(mouse::Button::Left)) => {
@@ -359,7 +359,7 @@ impl Widget<Message, iced::Theme, iced::Renderer> for VirtualGallery<'_> {
                         self.report(shell, state.target, bounds.height);
                         state.last_emitted = state.target;
                         shell.capture_event();
-                        shell.request_redraw();
+                        crate::frame::request_redraw_gated(shell);
                     }
                 }
             }
@@ -375,7 +375,7 @@ impl Widget<Message, iced::Theme, iced::Renderer> for VirtualGallery<'_> {
                         self.report(shell, state.target, bounds.height);
                         state.last_emitted = state.target;
                         shell.capture_event();
-                        shell.request_redraw();
+                        crate::frame::request_redraw_gated(shell);
                     }
                 } else if let Some(cursor) = cursor.position() {
                     // Moving along the bar's edge reveals it and keeps the
@@ -387,7 +387,7 @@ impl Widget<Message, iced::Theme, iced::Renderer> for VirtualGallery<'_> {
                         let was_visible = state.scrollbar_alpha > 0.001;
                         state.touch_scrollbar();
                         if !was_visible {
-                            shell.request_redraw();
+                            crate::frame::request_redraw_gated(shell);
                         }
                     }
                 }
@@ -416,7 +416,7 @@ impl Widget<Message, iced::Theme, iced::Renderer> for VirtualGallery<'_> {
                 // until it is fully transparent.
                 let fading = state.update_scrollbar_fade();
                 if state.offset != state.target || fading {
-                    shell.request_redraw();
+                    crate::frame::request_redraw_gated(shell);
                 }
             }
             _ => {}
@@ -465,11 +465,16 @@ impl Widget<Message, iced::Theme, iced::Renderer> for VirtualGallery<'_> {
     ) {
         let bounds = layout.bounds();
         let state = tree.state.downcast_ref::<GalleryState>();
-
         // Resize guard: a degenerate viewport (window collapsed mid-resize)
         // must not reach the renderer — zero-area layers can panic wgpu.
         if bounds.width <= 0.0 || bounds.height <= 0.0 {
             return;
+        }
+        if std::env::var_os("PIXIV_MANAGER_PROBE").is_some() {
+            eprintln!(
+                "[vg] draw bounds={bounds:?} offset={} first_row={}",
+                state.offset, self.first_row,
+            );
         }
 
         // Clip to the viewport and translate children by the scroll offset.

@@ -1,6 +1,6 @@
 use crate::app::message::Message;
 use crate::theme;
-use crate::widgets::{illust_info, parallax_image};
+use crate::widgets::{blur_image, illust_info, parallax_image};
 use pixivj_rs::model::Illustration;
 
 #[allow(clippy::too_many_arguments)]
@@ -16,9 +16,9 @@ pub fn gallery_item<'a>(
     // Bookmark dimming: the item's bookmark state + whether non-Bookmarks
     // tabs dim bookmarked items.
     dim_bookmarked: bool,
-    // R-18 blur: enabled by the setting; `hovered` un-blurs this tile.
+    // R-18 blur: enabled by the setting (the shader animates un-blur on
+    // hover itself).
     blur_r18: bool,
-    hovered: bool,
 ) -> iced::Element<'a, Message> {
     let id = illust.id;
     let bookmarked = illust.bookmarked();
@@ -26,7 +26,19 @@ pub fn gallery_item<'a>(
     let thumbnail: iced::Element<'_, Message> = if let Some(handle) = thumbnail_handle {
         // Cached handle → parallax crop-to-fill tile (no per-frame decode).
         // The parallax fills the whole cell, so there's no visible seam.
-        parallax_image::parallax_image(handle.clone(), width, height, parallax)
+        let base = parallax_image::parallax_image(handle.clone(), width, height, parallax);
+        if blur_r18 && illust.is_r18() {
+            // The R-18 censoring layer sits ON TOP of the parallax tile: a
+            // GPU-blurred cover crop whose radius AND alpha animate to
+            // sharp/transparent while hovered, so the parallax (and the
+            // cursor/scroll motion it follows) stays alive underneath.
+            match blur_image::blur_image(handle, width, height) {
+                Some(blur) => iced::widget::stack![base, blur].into(),
+                None => base,
+            }
+        } else {
+            base
+        }
     } else {
         // Placeholder while loading (theme-aware background, no border).
         iced::widget::container(
@@ -91,15 +103,6 @@ pub fn gallery_item<'a>(
 
     let info = illust_info::illust_info(illust, text);
 
-    // ── Dim bookmarked items (BookmarkedDisplay::Dim, non-Bookmarks tabs) ──
-    let dim = dim_bookmarked && bookmarked;
-
-    // ── R-18 blur: a frosted cover that lifts while the cursor is over the
-    // tile. mouse_area tracks hover into AppState so the next frame rebuilds
-    // un-blurred.
-    let r18 = illust.is_r18();
-    let blurred = blur_r18 && r18 && !hovered;
-
     // Aggregated download progress (bottom edge): a thin bar tracking the
     // downloader's overall multi-page fraction while the item is in flight.
     // It is only built while the tracker holds the item, so it vanishes as
@@ -125,67 +128,24 @@ pub fn gallery_item<'a>(
         None => iced::widget::text("").into(),
     };
 
-    // The optional dim / blur overlays only exist while they apply, so an
+    // The optional dim overlay only exists while it applies, so an
     // untouched tile keeps the exact original stack shape (widget-tree
-    // identity and click handling unchanged).
+    // identity and click handling unchanged). No centered icon: dimming is
+    // purely a visual fade of the thumbnail (the info text stays readable).
+    let dim = dim_bookmarked && bookmarked;
     let mut layers: Vec<iced::Element<'a, Message>> = vec![thumbnail];
     if dim {
         layers.push(
-            iced::widget::container(
-                iced::widget::text("★")
-                    .size(text.secondary_size())
-                    .color(iced::Color::WHITE),
-            )
-            .center_x(iced::Length::Fill)
-            .center_y(iced::Length::Fill)
-            .width(iced::Length::Fill)
-            .height(iced::Length::Fill)
-            .style(|_| iced::widget::container::Style {
-                background: Some(iced::Background::Color(iced::Color::from_rgba(
-                    0.0, 0.0, 0.0, 0.55,
-                ))),
-                ..Default::default()
-            })
-            .into(),
-        );
-    }
-    if blurred {
-        layers.push(
-            iced::widget::container(
-                iced::widget::column![
-                    iced::widget::text("🔒").size(text.secondary_size()),
-                    iced::widget::container(
-                        iced::widget::text("R-18")
-                            .size(text.badge_size())
-                            .color(iced::Color::WHITE),
-                    )
-                    .padding(iced::Padding::from([1, 4]))
-                    .style(|_| iced::widget::container::Style {
-                        background: Some(iced::Background::Color(iced::Color::from_rgb(
-                            0.9, 0.2, 0.2
-                        ))),
-                        border: iced::Border {
-                            radius: 3.0.into(),
-                            ..Default::default()
-                        },
-                        ..Default::default()
-                    }),
-                ]
-                .spacing(2)
-                .align_x(iced::Alignment::Center),
-            )
-            .center_x(iced::Length::Fill)
-            .center_y(iced::Length::Fill)
-            .width(iced::Length::Fill)
-            .height(iced::Length::Fill)
-            .style(|theme| iced::widget::container::Style {
-                background: Some(iced::Background::Color(iced::Color {
-                    a: 0.72,
-                    ..crate::theme::bg(theme)
-                })),
-                ..Default::default()
-            })
-            .into(),
+            iced::widget::container(iced::widget::text(""))
+                .width(iced::Length::Fill)
+                .height(iced::Length::Fill)
+                .style(|_| iced::widget::container::Style {
+                    background: Some(iced::Background::Color(iced::Color::from_rgba(
+                        0.0, 0.0, 0.0, 0.55,
+                    ))),
+                    ..Default::default()
+                })
+                .into(),
         );
     }
     layers.push(
@@ -208,18 +168,6 @@ pub fn gallery_item<'a>(
     layers.push(progress);
     let stack = iced::widget::Stack::with_children(layers);
 
-    // Hover tracking for the R-18 blur (un-blur on hover): a mouse_area
-    // inside the button feeds the hover state back to update(). It wraps the
-    // whole tile so entering/leaving from any edge is detected.
-    let tile: iced::Element<'a, Message> = if blur_r18 && r18 {
-        iced::widget::mouse_area(crate::widgets::clip_viewport::ClipViewport::new(stack))
-            .on_enter(Message::GalleryItemHover(id, true))
-            .on_exit(Message::GalleryItemHover(id, false))
-            .into()
-    } else {
-        crate::widgets::clip_viewport::ClipViewport::new(stack).into()
-    };
-
     // Seamless tile: no padding, no border, no radius — the image itself
     // fills the cell and adjacent tiles touch edge to edge. Height is fixed
     // (the grid size); width varies with the window.
@@ -229,7 +177,7 @@ pub fn gallery_item<'a>(
     // scroll-parallax reference viewport equal to the tile itself (zero
     // offset). `ClipViewport` clips the drawing but keeps the gallery's real
     // viewport for the parallax math.
-    iced::widget::button(tile)
+    iced::widget::button(crate::widgets::clip_viewport::ClipViewport::new(stack))
         .on_press(Message::GalleryItemClicked(id))
         .clip(false)
         .padding(iced::Padding::ZERO)

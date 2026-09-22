@@ -7,7 +7,6 @@
 
 use iced::widget::canvas::{self, Cache, Canvas, Frame, Program, Text};
 use iced::{Element, Font, Length, Point, Rectangle, Size};
-use std::cell::Cell;
 
 /// Data shown by the overlay (snapshotted by the caller each frame).
 #[derive(Debug, Clone, Default)]
@@ -17,7 +16,6 @@ pub struct DebugData {
     pub cores: usize,
     pub mem_used_mb: f64,
     pub mem_total_mb: f64,
-    pub fps: f32,
     pub gallery_items: usize,
     pub thumbnails: usize,
     pub thumb_attempts: u64,
@@ -38,7 +36,7 @@ pub struct DebugData {
 pub fn debug_overlay(data: DebugData) -> Element<'static, crate::app::message::Message> {
     Canvas::new(Overlay::new(data))
         .width(Length::Fixed(340.0))
-        .height(Length::Fixed(230.0))
+        .height(Length::Fixed(320.0))
         .into()
 }
 
@@ -67,8 +65,6 @@ impl Line {
 struct Overlay {
     data: DebugData,
     cache: Cache,
-    last_frame: Cell<std::time::Instant>,
-    fps: Cell<f32>,
 }
 
 impl Overlay {
@@ -76,8 +72,6 @@ impl Overlay {
         Self {
             data,
             cache: Cache::default(),
-            last_frame: Cell::new(std::time::Instant::now()),
-            fps: Cell::new(0.0),
         }
     }
 
@@ -101,7 +95,16 @@ impl Overlay {
             )
             .with_bar(mem_frac),
         );
-        lines.push(Line::new("FPS", format!("{:.1}", self.fps.get())));
+        // Frame pacing: FPS + median frame time, measured from the actual
+        // rendered-frame cadence (the root FrameTick widget).
+        lines.push(Line::new(
+            "FPS",
+            format!(
+                "{:.1} · med {:.1} ms",
+                crate::frame::fps(),
+                crate::frame::median_frame_ms()
+            ),
+        ));
         lines.push(Line::new(
             "GALLERY",
             format!("{} items", self.data.gallery_items),
@@ -164,21 +167,13 @@ impl Program<crate::app::message::Message> for Overlay {
         bounds: Rectangle,
         _cursor: iced::mouse::Cursor,
     ) -> Vec<canvas::Geometry<iced::Renderer>> {
-        // FPS: EMA of the frame cadence.
-        let now = std::time::Instant::now();
-        let dt = now.duration_since(self.last_frame.get()).as_secs_f32();
-        self.last_frame.set(now);
-        let frame_fps = if dt > 0.0 { 1.0 / dt } else { 0.0 };
-        let fps = if self.fps.get() == 0.0 {
-            frame_fps
-        } else {
-            self.fps.get() * 0.9 + frame_fps * 0.1
-        };
-        self.fps.set(fps);
-
+        // The overlay is rebuilt per view build, but the chart must show the
+        // live rendered-frame cadence: read the tick widget's rolling window.
         let lines = self.lines();
+        let frame_times = crate::frame::frame_times();
         let frame = self.cache.draw(renderer, bounds.size(), |frame| {
             draw_panel(frame, bounds.size(), &lines);
+            draw_frame_chart(frame, bounds.size(), &frame_times);
         });
         // The canvas geometry is drawn at its own layout position already
         // (the Canvas widget translates it), so no manual offset is needed.
@@ -231,5 +226,57 @@ fn draw_panel(frame: &mut Frame, size: Size, lines: &[Line]) {
             ..Text::default()
         });
         y += line_h;
+    }
+}
+
+/// The rolling frame-time chart: one bar per recorded interval, drawn below
+/// the text lines. The y scale tops out at 33 ms (a dropped double-frame);
+/// a 60 fps guide line (16.7 ms) is drawn for reference.
+fn draw_frame_chart(frame: &mut Frame, size: Size, times: &[f32]) {
+    // Below the text block (the longest line set is 11 rows) + header.
+    let top = 8.0 + 19.0 * 11.0 + 14.0;
+    if size.height < top + 60.0 {
+        return;
+    }
+    let chart_y = top + 12.0;
+    let chart_h = size.height - chart_y - 12.0;
+    let chart_w = size.width - 16.0;
+
+    let font = Font::MONOSPACE;
+    frame.fill_text(Text {
+        content: format!(
+            "frame times — newest → (max {:.1} ms)   ▬ 60 fps",
+            times.iter().copied().fold(0.0f32, f32::max)
+        ),
+        position: Point::new(8.0, top),
+        color: iced::Color::from_rgba(1.0, 1.0, 1.0, 0.75),
+        size: iced::Pixels(10.0),
+        font,
+        ..Text::default()
+    });
+
+    // 60 fps guide line (16.7 ms); the y scale tops out at 33.3 ms.
+    const GUIDE_MS: f32 = 16.7;
+    const MAX_MS: f32 = 33.3;
+    let guide_h = (GUIDE_MS / MAX_MS * chart_h).clamp(0.0, chart_h);
+    frame.fill_rectangle(
+        Point::new(8.0, chart_y + chart_h - guide_h),
+        Size::new(chart_w, 1.0),
+        iced::Color::from_rgba(0.2, 0.8, 0.4, 0.6),
+    );
+
+    // One bar per interval; the newest samples sit at the right edge.
+    let visible = (chart_w.max(1.0) as usize).min(times.len());
+    let n = visible.max(1);
+    let slot_w = chart_w / n as f32;
+    let bar_w = (slot_w - 0.5).max(1.0);
+    for (i, ms) in times.iter().rev().take(visible).enumerate() {
+        let h = (ms.min(MAX_MS) / MAX_MS * chart_h).clamp(0.0, chart_h);
+        let x = 8.0 + chart_w - (i as f32 + 1.0) * slot_w;
+        frame.fill_rectangle(
+            Point::new(x, chart_y + chart_h - h),
+            Size::new(bar_w, h),
+            iced::Color::from_rgba(1.0, 1.0, 1.0, 0.55),
+        );
     }
 }

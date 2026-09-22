@@ -304,6 +304,9 @@ fn icon_btn(label: &str, msg: Message, enabled: bool) -> iced::Element<'_, Messa
 /// * idle: "⬇"
 /// * downloading: "⏳ NN%" (disabled)
 /// * done: "✓" (disabled)
+///
+/// All three size to their content: a fixed width clipped the progress
+/// percentage text outside the button (the reported bug).
 fn download_icon(state: &AppState, illust_id: u64) -> iced::Element<'_, Message> {
     if state.jobs.downloads.is_downloading(illust_id) {
         let frac = state
@@ -313,8 +316,17 @@ fn download_icon(state: &AppState, illust_id: u64) -> iced::Element<'_, Message>
             .map(|s| s.progress_fraction())
             .unwrap_or(0.0);
         iced::widget::button(iced::widget::text(format!("⏳{:.0}%", frac * 100.0)).size(12))
-            .width(48)
+            .width(iced::Length::Shrink)
             .height(26)
+            .padding(iced::Padding::from([2, 8]))
+            .style(|theme, status| iced::widget::button::Style {
+                text_color: if status == iced::widget::button::Status::Disabled {
+                    crate::theme::muted(theme)
+                } else {
+                    crate::theme::fg(theme)
+                },
+                ..Default::default()
+            })
             .into()
     } else if state.jobs.downloads.is_completed(illust_id) {
         iced::widget::button(
@@ -322,14 +334,16 @@ fn download_icon(state: &AppState, illust_id: u64) -> iced::Element<'_, Message>
                 .size(14)
                 .color(crate::theme::SUCCESS),
         )
-        .width(48)
+        .width(iced::Length::Shrink)
         .height(26)
+        .padding(iced::Padding::from([2, 10]))
         .into()
     } else {
         iced::widget::button(iced::widget::text("⬇").size(14))
             .on_press(Message::DownloadStarted(illust_id))
-            .width(48)
+            .width(iced::Length::Shrink)
             .height(26)
+            .padding(iced::Padding::from([2, 10]))
             .into()
     }
 }

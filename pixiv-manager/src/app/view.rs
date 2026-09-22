@@ -142,7 +142,6 @@ pub fn view(state: &AppState) -> iced::Element<'_, Message> {
         state.settings.bookmarked_display == crate::app::state::BookmarkedDisplay::Dim
             && state.active_tab != Tab::Bookmarks,
         state.settings.blur_r18,
-        &state.hovered_tiles,
     );
 
     // ── Empty-state differentiation ─────────────────────────────────
@@ -292,7 +291,6 @@ pub fn view(state: &AppState) -> iced::Element<'_, Message> {
                 .unwrap_or(1),
             mem_used_mb: memory_used_mb(),
             mem_total_mb: memory_total_mb(),
-            fps: 0.0,
             gallery_items: illusts.len(),
             thumbnails: state.images.thumbnail_handles.len(),
             thumb_attempts: state
@@ -351,7 +349,6 @@ pub fn view(state: &AppState) -> iced::Element<'_, Message> {
             parallax,
             state.settings.bookmarked_display == crate::app::state::BookmarkedDisplay::Dim,
             state.settings.blur_r18,
-            &state.hovered_tiles,
         ));
     }
 
@@ -403,6 +400,11 @@ pub fn view(state: &AppState) -> iced::Element<'_, Message> {
             .into(),
         );
     }
+
+    // The frame-tick widget rides at the end of the root stack: it observes
+    // every rendered frame (RedrawRequested) for the frame-time telemetry
+    // and the fps limiter, at zero rendering cost.
+    layers.push(crate::frame::FrameTick.into());
 
     iced::widget::Stack::with_children(layers).into()
 }

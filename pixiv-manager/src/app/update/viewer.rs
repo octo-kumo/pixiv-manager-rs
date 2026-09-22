@@ -1028,15 +1028,6 @@ pub(super) fn handle(state: &mut AppState, message: Message) -> iced::Task<Messa
             open_viewer(state, id)
         }
 
-        Message::GalleryItemHover(id, entered) => {
-            if entered {
-                state.hovered_tiles.insert(id);
-            } else {
-                state.hovered_tiles.remove(&id);
-            }
-            iced::Task::none()
-        }
-
         Message::GalleryItemDoubleClicked(id) => {
             // Double-click opens the viewer and fetches illust detail + comments
             open_viewer(state, id)

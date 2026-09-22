@@ -50,16 +50,11 @@ pub fn control_pane<'a>(
         .on_press(Message::ResetFilters)
         .padding(iced::Padding::from([2, 8]));
 
-    let search_row = iced::widget::row![search, toggle, clear]
-        .spacing(4)
-        .align_y(iced::Alignment::Center);
-
-    let mut children: Vec<iced::Element<'a, Message>> = vec![search_row.into()];
-
     // Continuous "load all pages" button with progress (Search tab plus the
-    // paginated Pixiv tabs).
-    if show_auto_load {
-        let btn: iced::Element<'a, Message> = if auto_load {
+    // paginated Pixiv tabs) — sits inline with the filter buttons, not on
+    // its own row.
+    let auto_load_btn: Option<iced::Element<'a, Message>> = if show_auto_load {
+        Some(if auto_load {
             iced::widget::button(
                 iced::widget::row![
                     iced::widget::text("⏳").size(12),
@@ -88,9 +83,21 @@ pub fn control_pane<'a>(
             .on_press(Message::ToggleAutoLoad)
             .padding(iced::Padding::from([2, 8]))
             .into()
-        };
-        children.push(btn);
+        })
+    } else {
+        None
+    };
+
+    let mut search_row_elems: Vec<iced::Element<'a, Message>> =
+        vec![search.into(), toggle.into(), clear.into()];
+    if let Some(btn) = auto_load_btn {
+        search_row_elems.push(btn);
     }
+    let search_row = iced::widget::Row::with_children(search_row_elems)
+        .spacing(4)
+        .align_y(iced::Alignment::Center);
+
+    let mut children: Vec<iced::Element<'a, Message>> = vec![search_row.into()];
 
     // Autocomplete tag dropdown (search tab only). The keyboard-highlighted
     // entry (↑/↓) gets the accent border.
