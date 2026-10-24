@@ -71,6 +71,8 @@ fn make_filter_state(text: String, opts: OptionTristates, tags: Vec<String>) -> 
         miss,
     } = opts;
     FilterState {
+        mode: pixiv_manager::app::filter::FilterMode::Classic,
+        query_text: String::new(),
         search_text: text,
         search_tags: true,
         search_author: true,
@@ -234,6 +236,7 @@ proptest! {
             active,
             color: None,
             color_level: 0,
+            custom_color_text: None,
         };
 
         let mut sorted = illusts.clone();
@@ -269,6 +272,7 @@ proptest! {
             active,
             color: None,
             color_level: 0,
+            custom_color_text: None,
         };
 
         let mut once = illusts.clone();
@@ -322,6 +326,7 @@ proptest! {
             active: vec![(key1, dir1), (key2, dir2)],
             color: None,
             color_level: 0,
+            custom_color_text: None,
         };
 
         let mut sorted = illusts;

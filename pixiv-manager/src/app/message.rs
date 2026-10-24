@@ -76,8 +76,18 @@ pub enum Message {
     ColorPassPalette(u64, Vec<[u8; 3]>),
     /// Fill in missing metadata (color palettes) for all bookmark illusts.
     ProcessAllColors,
+    /// Switch every tab between classic filters and the text query.
+    FilterModeChanged(crate::app::filter::FilterMode),
+    /// Remove the n-th token of the active tab's text query.
+    QueryTokenRemoved(usize),
+    /// A query suggestion was picked (replaces the token being typed).
+    QuerySuggestionClicked(String),
     /// The user picked a color for the sRGB color sort.
     ColorSortChanged([u8; 3]),
+    /// The user selected the custom-color swatch (shows its text input).
+    CustomColorSelected,
+    /// The custom-color text input changed.
+    CustomColorTextChanged(String),
     /// The user changed the color-sort level (1–5).
     ColorLevelChanged(u8),
     /// The user pressed Enter in the search bar (runs a Pixiv search).
@@ -315,6 +325,21 @@ pub enum Message {
     DownloadPriorityDown(u64),
     /// Relative/clamped page navigation (keyboard ←/→/Home/End).
     ViewerPageNavigate(crate::app::state::ViewerPageNav),
+    /// Combine the pages along an axis (or undo when already on it).
+    ViewerMergeToggled(crate::viewer_tools::MergeAxis),
+    /// Rotate the shown image by quarter turns (+1 clockwise, -1 counter).
+    ViewerRotate(i8),
+    /// Drop every transform of the open item.
+    ViewerTransformReset,
+    /// The split-image probe finished for an illust.
+    ViewerSplitDetected(u64, Option<crate::viewer_tools::MergeAxis>),
+    /// A transform render finished.
+    ViewerTransformReady(
+        crate::viewer_tools::TransformKey,
+        Result<iced::widget::image::Handle, String>,
+    ),
+    /// Toggle the Twitter viewer's combine/rotate toolbar.
+    TwitterViewerToolsChanged(bool),
     /// Text typed into the viewer's jump-to-page box.
     ViewerPageInputChanged(String),
     /// Enter pressed in the jump-to-page box.

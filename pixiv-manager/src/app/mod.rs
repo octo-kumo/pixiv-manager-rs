@@ -1,5 +1,6 @@
 pub mod filter;
 pub mod message;
+pub mod query;
 pub mod sort;
 pub mod state;
 pub mod subscription;

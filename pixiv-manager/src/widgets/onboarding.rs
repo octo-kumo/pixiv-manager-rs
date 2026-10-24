@@ -21,22 +21,14 @@ pub fn onboarding_view(state: &AppState) -> iced::Element<'_, Message> {
             let login_url = state.onboarding.login_url.clone().unwrap_or_default();
 
             // Accent-filled primary button; label color adapts to the theme.
-            let login_button = iced::widget::button(
+            let login_button = crate::ui::button(
                 iced::widget::text("Log in with Pixiv")
                     .size(16)
                     .color(theme::on_accent(&t)),
             )
             .on_press_maybe((!login_url.is_empty()).then_some(Message::OpenUrl(login_url)))
             .padding(iced::Padding::from([10, 24]))
-            .style(move |theme, _| iced::widget::button::Style {
-                background: Some(iced::Background::Color(theme::accent(theme))),
-                text_color: theme::on_accent(theme),
-                border: iced::Border {
-                    radius: 6.0.into(),
-                    ..Default::default()
-                },
-                ..Default::default()
-            });
+            .style(crate::ui::primary);
 
             // The last failure (rejected token, failed exchange), if any.
             let error_note: Option<iced::Element<'_, Message>> =
@@ -44,14 +36,7 @@ pub fn onboarding_view(state: &AppState) -> iced::Element<'_, Message> {
                     iced::widget::container(iced::widget::text(format!("⚠ {error}")).size(12))
                         .padding(8)
                         .width(iced::Length::Fill)
-                        .style(|_theme: &iced::Theme| iced::widget::container::Style {
-                            background: Some(iced::Color::from_rgb(0.30, 0.10, 0.10).into()),
-                            border: iced::Border {
-                                radius: 4.0.into(),
-                                ..Default::default()
-                            },
-                            ..iced::widget::container::Style::default()
-                        })
+                        .style(crate::ui::error_banner)
                         .into()
                 });
 
@@ -69,7 +54,7 @@ pub fn onboarding_view(state: &AppState) -> iced::Element<'_, Message> {
                 )
                 .size(12),
                 iced::widget::text("").size(8),
-                iced::widget::text_input(
+                crate::ui::text_input(
                     "Paste the URL from your address bar (or a refresh token)...",
                     &state.onboarding.token,
                 )
@@ -77,7 +62,7 @@ pub fn onboarding_view(state: &AppState) -> iced::Element<'_, Message> {
                 .on_submit(Message::TokenSubmitted(state.onboarding.token.clone()))
                 .size(14)
                 .width(iced::Length::Fill),
-                iced::widget::button(iced::widget::text("Continue"))
+                crate::ui::button(iced::widget::text("Continue"))
                     .on_press_maybe(
                         (!state.onboarding.token.is_empty())
                             .then_some(Message::TokenSubmitted(state.onboarding.token.clone())),
@@ -118,13 +103,13 @@ pub fn onboarding_view(state: &AppState) -> iced::Element<'_, Message> {
                 iced::widget::text(dir_display)
                     .size(12)
                     .color(theme::muted(&t)),
-                iced::widget::button(iced::widget::text("Choose Directory..."))
+                crate::ui::button(iced::widget::text("Choose Directory..."))
                     .on_press(Message::PickDirectory)
                     .padding(iced::Padding::from([8, 16])),
             ]
             .spacing(8);
 
-            let done_btn = iced::widget::button(iced::widget::text("Start Pixiv Manager →"))
+            let done_btn = crate::ui::button(iced::widget::text("Start Pixiv Manager →"))
                 .on_press(Message::OnboardingComplete)
                 .padding(iced::Padding::from([10, 24]));
 

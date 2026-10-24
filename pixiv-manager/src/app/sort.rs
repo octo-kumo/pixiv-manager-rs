@@ -165,6 +165,106 @@ fn nearest_hue_distance(c: [u8; 3], palette: &[[u8; 3]], level: u8) -> Option<f6
     Some(nearest.unwrap_or(f64::MAX))
 }
 
+// ── Color parsing ──────────────────────────────────────────────────────
+
+/// Parse a user-typed color into sRGB. Accepts `#rgb`, `#rrggbb` (alpha
+/// variants ignore alpha; the leading `#` is optional), `rgb(r, g, b)` /
+/// `rgba(..)` with 0–255 or percentage channels, `hsl(h, s%, l%)` /
+/// `hsla(..)`, and a few common color names. `None` if it doesn't parse.
+pub fn parse_color(input: &str) -> Option<[u8; 3]> {
+    let s = input.trim().to_ascii_lowercase();
+    if s.is_empty() {
+        return None;
+    }
+    if let Some(open) = s.find('(') {
+        let body = s[open + 1..].strip_suffix(')')?;
+        let func = s[..open].trim();
+        let parts: Vec<&str> = body
+            .split([',', ' ', '/'])
+            .map(str::trim)
+            .filter(|p| !p.is_empty())
+            .collect();
+        if !(parts.len() == 3 || parts.len() == 4) {
+            return None;
+        }
+        return match func {
+            "rgb" | "rgba" => {
+                let ch = |p: &str| -> Option<u8> {
+                    if let Some(pct) = p.strip_suffix('%') {
+                        let v: f64 = pct.trim().parse().ok()?;
+                        (0.0..=100.0)
+                            .contains(&v)
+                            .then(|| (v / 100.0 * 255.0).round() as u8)
+                    } else {
+                        let v: f64 = p.parse().ok()?;
+                        (0.0..=255.0).contains(&v).then(|| v.round() as u8)
+                    }
+                };
+                Some([ch(parts[0])?, ch(parts[1])?, ch(parts[2])?])
+            }
+            "hsl" | "hsla" => {
+                let h: f64 = parts[0].trim_end_matches("deg").parse().ok()?;
+                let pct = |p: &str| -> Option<f64> {
+                    let v: f64 = p.strip_suffix('%')?.trim().parse().ok()?;
+                    (0.0..=100.0).contains(&v).then_some(v / 100.0)
+                };
+                Some(hsl_to_rgb(
+                    h.rem_euclid(360.0),
+                    pct(parts[1])?,
+                    pct(parts[2])?,
+                ))
+            }
+            _ => None,
+        };
+    }
+    let hex = s.strip_prefix('#').unwrap_or(&s);
+    if hex.chars().all(|c| c.is_ascii_hexdigit()) {
+        let digit = |c: char| c.to_digit(16).unwrap() as u8;
+        let cs: Vec<char> = hex.chars().collect();
+        return match cs.len() {
+            3 | 4 => Some([digit(cs[0]) * 17, digit(cs[1]) * 17, digit(cs[2]) * 17]),
+            6 | 8 => Some([
+                digit(cs[0]) * 16 + digit(cs[1]),
+                digit(cs[2]) * 16 + digit(cs[3]),
+                digit(cs[4]) * 16 + digit(cs[5]),
+            ]),
+            _ => None,
+        };
+    }
+    match s.as_str() {
+        "red" => Some([255, 0, 0]),
+        "orange" => Some([255, 165, 0]),
+        "yellow" => Some([255, 255, 0]),
+        "green" => Some([0, 128, 0]),
+        "lime" => Some([0, 255, 0]),
+        "cyan" | "aqua" => Some([0, 255, 255]),
+        "blue" => Some([0, 0, 255]),
+        "purple" => Some([128, 0, 128]),
+        "magenta" | "fuchsia" => Some([255, 0, 255]),
+        "pink" => Some([255, 192, 203]),
+        "brown" => Some([165, 42, 42]),
+        "black" => Some([0, 0, 0]),
+        "white" => Some([255, 255, 255]),
+        "gray" | "grey" => Some([128, 128, 128]),
+        _ => None,
+    }
+}
+
+fn hsl_to_rgb(h: f64, s: f64, l: f64) -> [u8; 3] {
+    let c = (1.0 - (2.0 * l - 1.0).abs()) * s;
+    let x = c * (1.0 - ((h / 60.0) % 2.0 - 1.0).abs());
+    let m = l - c / 2.0;
+    let (r, g, b) = match (h / 60.0) as u32 {
+        0 => (c, x, 0.0),
+        1 => (x, c, 0.0),
+        2 => (0.0, c, x),
+        3 => (0.0, x, c),
+        4 => (x, 0.0, c),
+        _ => (c, 0.0, x),
+    };
+    [r, g, b].map(|v| ((v + m) * 255.0).round() as u8)
+}
+
 // ── Sort State ─────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -175,6 +275,9 @@ pub struct SortState {
     pub active: Vec<(SortKey, SortDirection)>,
     pub color: Option<[u8; 3]>,
     pub color_level: u8,
+    /// Raw text of the custom-color input; `Some` while the custom swatch is
+    /// the selected color source. Never rewritten by parsing.
+    pub custom_color_text: Option<String>,
 }
 
 impl SortState {
@@ -185,6 +288,7 @@ impl SortState {
             active: vec![(key, dir)],
             color: None,
             color_level: 0,
+            custom_color_text: None,
         }
     }
 
@@ -267,6 +371,40 @@ mod tests {
             is_muted: None,
             illust_ai_type: None,
             provider_data: None,
+        }
+    }
+
+    #[test]
+    fn parse_color_formats() {
+        assert_eq!(parse_color("#ff8000"), Some([255, 128, 0]));
+        assert_eq!(parse_color("#F80"), Some([255, 136, 0]));
+        assert_eq!(parse_color("  00ff00 "), Some([0, 255, 0]));
+        assert_eq!(parse_color("#11223344"), Some([0x11, 0x22, 0x33]));
+        assert_eq!(parse_color("rgb(10, 20, 30)"), Some([10, 20, 30]));
+        assert_eq!(parse_color("RGB(10 20 30)"), Some([10, 20, 30]));
+        assert_eq!(parse_color("rgba(10,20,30,0.5)"), Some([10, 20, 30]));
+        assert_eq!(parse_color("rgb(100%, 0%, 50%)"), Some([255, 0, 128]));
+        assert_eq!(parse_color("hsl(120, 100%, 50%)"), Some([0, 255, 0]));
+        assert_eq!(parse_color("Red"), Some([255, 0, 0]));
+    }
+
+    #[test]
+    fn parse_color_rejects_garbage() {
+        for bad in [
+            "",
+            "#",
+            "#12",
+            "#12345",
+            "#gg0000",
+            "rgb(1,2)",
+            "rgb(256,0,0)",
+            "rgb(a,b,c)",
+            "hsl(0,1,1)",
+            "foo(1,2,3)",
+            "nope",
+            "rgb(1,2,3",
+        ] {
+            assert_eq!(parse_color(bad), None, "{bad}");
         }
     }
 

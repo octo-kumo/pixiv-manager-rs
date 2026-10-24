@@ -189,11 +189,11 @@ pub fn settings_screen(state: &AppState) -> iced::Element<'_, Message> {
     rows.push(setting_row(
         "Gallery directory",
         iced::widget::row![
-            iced::widget::text_input("e.g. ~/Pictures/Pixiv", &path_text)
+            crate::ui::text_input("e.g. ~/Pictures/Pixiv", &path_text)
                 .on_input(Message::GalleryPathInputChanged)
                 .size(13)
                 .width(iced::Length::FillPortion(4)),
-            iced::widget::button(iced::widget::text("Browse...").size(12))
+            crate::ui::button(iced::widget::text("Browse...").size(12))
                 .on_press(Message::PickDirectory)
                 .padding(iced::Padding::from([4, 10])),
         ]
@@ -207,7 +207,7 @@ pub fn settings_screen(state: &AppState) -> iced::Element<'_, Message> {
     let proxy_text = state.settings.proxy.clone().unwrap_or_default();
     rows.push(setting_row(
         "Proxy (e.g. http://127.0.0.1:7890)",
-        iced::widget::text_input("None", &proxy_text)
+        crate::ui::text_input("None", &proxy_text)
             .on_input(Message::ProxyInputChanged)
             .size(13)
             .width(iced::Length::FillPortion(4))
@@ -234,14 +234,11 @@ pub fn settings_screen(state: &AppState) -> iced::Element<'_, Message> {
         "Twitter cookies file",
         iced::widget::column![
             iced::widget::row![
-                iced::widget::text_input(
-                    "~/.config/pixiv-manager/twitter_cookies.txt",
-                    &cookie_text,
-                )
-                .on_input(Message::TwitterCookiePathChanged)
-                .size(13)
-                .width(iced::Length::FillPortion(4)),
-                iced::widget::button(iced::widget::text("Reload").size(12))
+                crate::ui::text_input("~/.config/pixiv-manager/twitter_cookies.txt", &cookie_text,)
+                    .on_input(Message::TwitterCookiePathChanged)
+                    .size(13)
+                    .width(iced::Length::FillPortion(4)),
+                crate::ui::button(iced::widget::text("Reload").size(12))
                     .on_press(Message::ReloadTwitterCookies)
                     .padding(iced::Padding::from([4, 10])),
             ]
@@ -251,6 +248,17 @@ pub fn settings_screen(state: &AppState) -> iced::Element<'_, Message> {
         .spacing(2)
         .into(),
         Some(SettingsKey::TwitterCookies),
+        state,
+    ));
+
+    rows.push(setting_row(
+        "Twitter viewer tools",
+        checkbox_row(
+            "Combine split images / rotate in the detail view",
+            state.settings.twitter_viewer_tools,
+            Message::TwitterViewerToolsChanged,
+        ),
+        Some(SettingsKey::TwitterViewerTools),
         state,
     ));
 
@@ -267,7 +275,7 @@ pub fn settings_screen(state: &AppState) -> iced::Element<'_, Message> {
                 "Fetch the current ids when Twitter starts returning 404s."
             })
             .size(11),
-            iced::widget::button(
+            crate::ui::button(
                 iced::widget::text(if updating_ids {
                     "Updating…"
                 } else {
@@ -303,14 +311,14 @@ pub fn settings_screen(state: &AppState) -> iced::Element<'_, Message> {
         "Bilibili cookies file",
         iced::widget::column![
             iced::widget::row![
-                iced::widget::text_input(
+                crate::ui::text_input(
                     "~/.config/pixiv-manager/bilibili_cookies.txt",
                     &bili_cookie_text,
                 )
                 .on_input(Message::BilibiliCookiePathChanged)
                 .size(13)
                 .width(iced::Length::FillPortion(4)),
-                iced::widget::button(iced::widget::text("Reload").size(12))
+                crate::ui::button(iced::widget::text("Reload").size(12))
                     .on_press(Message::ReloadBilibiliCookies)
                     .padding(iced::Padding::from([4, 10])),
             ]
@@ -336,7 +344,7 @@ pub fn settings_screen(state: &AppState) -> iced::Element<'_, Message> {
     };
     rows.push(setting_row(
         "Bilibili users (ids, comma separated)",
-        iced::widget::text_input("e.g. 2105955, 12345678", &bili_users)
+        crate::ui::text_input("e.g. 2105955, 12345678", &bili_users)
             .on_input(Message::BilibiliUserIdsChanged)
             .size(13)
             .width(iced::Length::FillPortion(4))
@@ -433,16 +441,17 @@ pub fn settings_screen(state: &AppState) -> iced::Element<'_, Message> {
     ));
 
     // ── Global reset ───────────────────────────────────────────────
-    let reset_all = iced::widget::button(iced::widget::text("Reset all settings").size(13))
+    let reset_all = crate::ui::button(iced::widget::text("Reset all settings").size(13))
         .on_press(Message::ResetAllSettings)
-        .padding(iced::Padding::from([8, 16]));
+        .padding(iced::Padding::from([8, 16]))
+        .style(crate::ui::danger);
 
     let panel = iced::widget::container(
         iced::widget::column![
             header(),
             // Scrollable: the settings list is long (cookies, parallax,
             // memory, tile rows…); it must not overflow small windows.
-            iced::widget::scrollable(iced::widget::Column::with_children(rows).spacing(10))
+            crate::ui::scrollable(iced::widget::Column::with_children(rows).spacing(10))
                 .width(iced::Length::Fill)
                 .height(iced::Length::Fill),
             reset_all
@@ -451,15 +460,7 @@ pub fn settings_screen(state: &AppState) -> iced::Element<'_, Message> {
         .padding(24)
         .width(720),
     )
-    .style(|theme| iced::widget::container::Style {
-        background: Some(iced::Background::Color(crate::theme::panel(theme))),
-        border: iced::Border {
-            radius: 8.0.into(),
-            color: crate::theme::border(theme),
-            width: 1.0,
-        },
-        ..Default::default()
-    });
+    .style(crate::ui::card);
 
     iced::widget::container(panel)
         .center_x(iced::Length::Fill)
@@ -467,6 +468,7 @@ pub fn settings_screen(state: &AppState) -> iced::Element<'_, Message> {
         .width(iced::Length::Fill)
         .height(iced::Length::Fill)
         .padding(16)
+        .style(crate::ui::scrim)
         .into()
 }
 
@@ -475,9 +477,10 @@ fn header() -> iced::Element<'static, Message> {
     iced::widget::row![
         iced::widget::text("Settings").size(20),
         iced::widget::Space::new().width(iced::Length::Fill),
-        iced::widget::button(iced::widget::text("✕").size(14))
+        crate::ui::button(iced::widget::text("✕").size(14))
             .on_press(Message::CloseSettings)
-            .padding(iced::Padding::from([4, 10])),
+            .padding(iced::Padding::from([4, 10]))
+            .style(crate::ui::ghost),
     ]
     .into()
 }
@@ -493,11 +496,12 @@ fn setting_row<'a>(
     if let Some(key) = key {
         // Per-item reset: enabled only when the setting differs from default.
         let reset: iced::Element<'a, Message> =
-            iced::widget::button(iced::widget::text("Reset").size(11))
+            crate::ui::button(iced::widget::text("Reset").size(11))
                 .on_press_maybe(
                     (!state.settings.is_default(key)).then_some(Message::ResetSetting(key)),
                 )
                 .padding(iced::Padding::from([3, 8]))
+                .style(crate::ui::ghost)
                 .into();
         right.push(reset);
     }
@@ -516,7 +520,7 @@ fn checkbox_row<'a>(
     checked: bool,
     on_toggle: impl Fn(bool) -> Message + 'a,
 ) -> iced::Element<'a, Message> {
-    iced::widget::checkbox(checked)
+    crate::ui::checkbox(checked)
         .label(label)
         .on_toggle(on_toggle)
         .into()
@@ -528,22 +532,11 @@ fn mode_btn(
     selected: bool,
     on_click: impl Fn() -> Message + 'static,
 ) -> iced::Element<'static, Message> {
-    let mut btn = iced::widget::button(iced::widget::text(label).size(12))
+    crate::ui::button(iced::widget::text(label).size(12))
         .on_press(on_click())
-        .padding(iced::Padding::from([3, 10]));
-    if selected {
-        btn = btn.style(|theme, _| iced::widget::button::Style {
-            background: Some(iced::Background::Color(crate::theme::panel(theme))),
-            text_color: crate::theme::fg(theme),
-            border: iced::Border {
-                color: crate::theme::accent(theme),
-                width: 1.5,
-                radius: 4.0.into(),
-            },
-            ..Default::default()
-        });
-    }
-    btn.into()
+        .padding(iced::Padding::from([4, 12]))
+        .style(crate::ui::chip(selected))
+        .into()
 }
 
 /// Three-button tile-text style selector: Default / Invert / Background.
@@ -575,22 +568,13 @@ fn theme_selector(pref: ThemePreference) -> iced::Element<'static, Message> {
         ("Dark", ThemePreference::Dark),
     ] {
         let selected = pref == value;
-        let mut button: iced::widget::Button<'static, Message, iced::Theme> =
-            iced::widget::button(iced::widget::text(label).size(12))
+        buttons.push(
+            crate::ui::button(iced::widget::text(label).size(12))
                 .on_press(Message::ThemePreferenceChanged(value))
-                .padding(iced::Padding::from([4, 12]));
-        if selected {
-            button = button.style(|theme, _| iced::widget::button::Style {
-                background: Some(iced::Background::Color(crate::theme::accent(theme))),
-                text_color: crate::theme::on_accent(theme),
-                border: iced::Border {
-                    radius: 4.0.into(),
-                    ..Default::default()
-                },
-                ..Default::default()
-            });
-        }
-        buttons.push(button.into());
+                .padding(iced::Padding::from([4, 12]))
+                .style(crate::ui::chip(selected))
+                .into(),
+        );
     }
     iced::widget::row(buttons).spacing(4).into()
 }
@@ -604,14 +588,14 @@ fn stepper<'a>(
     on_change: impl Fn(u32) -> Message + 'a,
 ) -> iced::Element<'a, Message> {
     iced::widget::row![
-        iced::widget::button(iced::widget::text("−").size(14))
+        crate::ui::button(iced::widget::text("−").size(14))
             .on_press_maybe(
                 (value.saturating_sub(step) >= min)
                     .then_some(on_change(value.saturating_sub(step)))
             )
             .padding(iced::Padding::from([2, 8])),
         iced::widget::text(format!("{}", value)).size(13).width(30),
-        iced::widget::button(iced::widget::text("+").size(14))
+        crate::ui::button(iced::widget::text("+").size(14))
             .on_press_maybe((value + step <= max).then_some(on_change(value + step)))
             .padding(iced::Padding::from([2, 8])),
     ]

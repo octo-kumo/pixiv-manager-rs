@@ -10,21 +10,32 @@
 use crate::app::state::{AppState, ThemePreference};
 use iced::color;
 use iced::theme::Mode;
+use iced::theme::Palette;
 use iced::{Color, Theme};
+use std::sync::OnceLock;
 
 // ── Palette ────────────────────────────────────────────────────────────
 
-pub const BASE: Color = color!(0x1e, 0x1e, 0x2e);
-pub const SURFACE: Color = color!(0x31, 0x32, 0x44);
-pub const OVERLAY: Color = color!(0x45, 0x47, 0x5a);
-pub const MUTED: Color = color!(0x6c, 0x70, 0x86);
-pub const SUBTLE: Color = color!(0x58, 0x5b, 0x70);
-pub const TEXT: Color = color!(0xcd, 0xd6, 0xf4);
-pub const ACCENT: Color = color!(0x89, 0xb4, 0xfa);
-pub const GREEN: Color = color!(0xa6, 0xe3, 0xa1);
-pub const RED: Color = color!(0xf3, 0x8b, 0xa8);
-pub const YELLOW: Color = color!(0xf9, 0xe2, 0xaf);
-pub const PEACH: Color = color!(0xfa, 0xb3, 0x87);
+/// The app's own palettes. Everything else — button/input/scrollbar styles in
+/// [`crate::ui`], the helpers below — derives from these, so retuning the
+/// look means editing only this block.
+const DARK: Palette = Palette {
+    background: color!(0x0f, 0x11, 0x16),
+    text: color!(0xe8, 0xea, 0xf0),
+    primary: color!(0x6e, 0x8b, 0xff),
+    success: color!(0x3d, 0xd6, 0x8c),
+    warning: color!(0xf5, 0xa5, 0x24),
+    danger: color!(0xf4, 0x60, 0x7a),
+};
+
+const LIGHT: Palette = Palette {
+    background: color!(0xf5, 0xf6, 0xfa),
+    text: color!(0x17, 0x1a, 0x21),
+    primary: color!(0x4a, 0x63, 0xe7),
+    success: color!(0x16, 0xa0, 0x68),
+    warning: color!(0xd9, 0x8a, 0x0b),
+    danger: color!(0xd9, 0x3a, 0x55),
+};
 
 /// Resolve the [`iced::Theme`] for the current state.
 ///
@@ -32,13 +43,32 @@ pub const PEACH: Color = color!(0xfa, 0xb3, 0x87);
 ///   OS reports its preference).
 /// * `Light` / `Dark` → manual override.
 pub fn theme(state: &AppState) -> Theme {
-    match state.settings.theme {
-        ThemePreference::Light => Theme::Light,
-        ThemePreference::Dark => Theme::Dark,
-        ThemePreference::System => match state.theme_mode {
-            Mode::Light => Theme::Light,
-            _ => Theme::Dark,
-        },
+    let light = match state.settings.theme {
+        ThemePreference::Light => true,
+        ThemePreference::Dark => false,
+        ThemePreference::System => state.theme_mode == Mode::Light,
+    };
+    static THEMES: OnceLock<(Theme, Theme)> = OnceLock::new();
+    let (dark, bright) = THEMES.get_or_init(|| {
+        (
+            Theme::custom("Pixiv Manager Dark", DARK),
+            Theme::custom("Pixiv Manager Light", LIGHT),
+        )
+    });
+    if light {
+        bright.clone()
+    } else {
+        dark.clone()
+    }
+}
+
+/// `a` blended toward `b` by `t` (0 = a, 1 = b), opaque.
+pub fn mix(a: Color, b: Color, t: f32) -> Color {
+    Color {
+        r: a.r + (b.r - a.r) * t,
+        g: a.g + (b.g - a.g) * t,
+        b: a.b + (b.b - a.b) * t,
+        a: 1.0,
     }
 }
 
@@ -56,19 +86,35 @@ pub fn fg(theme: &Theme) -> Color {
     theme.extended_palette().background.base.text
 }
 
-/// Elevated panel/surface background.
+/// Raised surface (cards, inputs, inactive controls): the background nudged
+/// toward the text color.
 pub fn panel(theme: &Theme) -> Color {
-    theme.extended_palette().background.weak.color
+    mix(bg(theme), fg(theme), 0.06)
 }
 
-/// Border color.
+/// Hovered surface.
+pub fn panel_hover(theme: &Theme) -> Color {
+    mix(bg(theme), fg(theme), 0.11)
+}
+
+/// Pressed surface.
+pub fn panel_pressed(theme: &Theme) -> Color {
+    mix(bg(theme), fg(theme), 0.16)
+}
+
+/// Hairline border color.
 pub fn border(theme: &Theme) -> Color {
-    theme.extended_palette().background.strong.color
+    mix(bg(theme), fg(theme), 0.16)
+}
+
+/// Border color of emphasized/hovered controls.
+pub fn border_strong(theme: &Theme) -> Color {
+    mix(bg(theme), fg(theme), 0.30)
 }
 
 /// Muted/secondary text color.
 pub fn muted(theme: &Theme) -> Color {
-    theme.extended_palette().background.weak.text
+    mix(bg(theme), fg(theme), 0.62)
 }
 
 /// The theme's primary/accent color.

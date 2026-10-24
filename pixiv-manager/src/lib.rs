@@ -15,6 +15,8 @@ pub mod profiling;
 pub mod source;
 pub mod theme;
 pub mod twitter;
+pub mod ui;
+pub mod viewer_tools;
 pub mod widgets;
 
 #[cfg(feature = "test-util")]

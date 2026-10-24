@@ -25,5 +25,6 @@ pub mod tag_filter;
 pub mod tag_input;
 pub mod tristate;
 pub mod viewer;
+pub mod viewer_toolbar;
 pub mod virtual_gallery;
 pub mod wrap;

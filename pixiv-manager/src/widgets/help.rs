@@ -80,13 +80,13 @@ pub fn help_screen(t: &iced::Theme) -> iced::Element<'static, Message> {
     );
 
     let panel = iced::widget::container(
-        iced::widget::scrollable(
+        crate::ui::scrollable(
             iced::widget::column![
                 // Header with the close button.
                 iced::widget::row![
                     iced::widget::text("Help").size(20),
                     iced::widget::Space::new().width(iced::Length::Fill),
-                    iced::widget::button(iced::widget::text("✕").size(14))
+                    crate::ui::button(iced::widget::text("✕").size(14))
                         .on_press(Message::ToggleHelp)
                         .padding(iced::Padding::from([4, 10])),
                 ],
@@ -109,15 +109,7 @@ pub fn help_screen(t: &iced::Theme) -> iced::Element<'static, Message> {
     .width(720)
     .height(720)
     .padding(0)
-    .style(|theme| iced::widget::container::Style {
-        background: Some(iced::Background::Color(theme::panel(theme))),
-        border: iced::Border {
-            color: theme::border(theme),
-            width: 1.0,
-            radius: 8.0.into(),
-        },
-        ..Default::default()
-    });
+    .style(crate::ui::card);
 
     // Full-screen dim layer so the panel floats above everything.
     iced::widget::container(panel)
@@ -125,6 +117,7 @@ pub fn help_screen(t: &iced::Theme) -> iced::Element<'static, Message> {
         .center_y(iced::Length::Fill)
         .width(iced::Length::Fill)
         .height(iced::Length::Fill)
+        .style(crate::ui::scrim)
         .into()
 }
 

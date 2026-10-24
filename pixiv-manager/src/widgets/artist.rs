@@ -53,7 +53,7 @@ pub fn artist_page<'a>(
     }
     header_children.push(iced::widget::Space::new().width(iced::Length::Fill).into());
     header_children.push(
-        iced::widget::button(iced::widget::text("✕ Close"))
+        crate::ui::button(iced::widget::text("✕ Close"))
             .on_press(Message::ArtistClosed)
             .padding(iced::Padding::from([4, 12]))
             .into(),
@@ -162,7 +162,7 @@ fn build_gallery<'a>(
     let grid = iced::widget::Column::with_children(rows);
 
     // Infinite scroll: reaching the bottom fetches the artist's next page.
-    iced::widget::scrollable(grid)
+    crate::ui::scrollable(grid)
         .width(iced::Length::Fill)
         .height(iced::Length::Fill)
         .on_scroll(|viewport: iced::widget::scrollable::Viewport| {

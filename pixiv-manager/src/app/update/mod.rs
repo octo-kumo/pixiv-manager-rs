@@ -55,6 +55,8 @@ pub fn boot() -> (AppState, iced::Task<Message>) {
     // Restrict any pre-existing config to owner-only (it holds the token).
     fix_config_permissions();
 
+    state.view_transforms = crate::viewer_tools::load();
+
     // Load the centralized color map (palettes for the sRGB/Hue sorts).
     state.images.palettes = crate::io::colors::load_colors();
     log::info!(
@@ -942,10 +944,22 @@ pub(super) mod gallery;
 pub(super) mod jobs;
 pub(super) mod onboarding;
 pub(super) mod settings;
+pub mod transform;
 pub(super) mod twitter;
 pub(super) mod viewer;
 
+/// The reducer. After every message the viewer-transform sync starts any
+/// render or split probe the (possibly changed) viewer state calls for.
 pub fn update(state: &mut AppState, message: Message) -> iced::Task<Message> {
+    let task = update_message(state, message);
+    if state.viewer.open {
+        iced::Task::batch([task, transform::sync(state)])
+    } else {
+        task
+    }
+}
+
+fn update_message(state: &mut AppState, message: Message) -> iced::Task<Message> {
     log::debug!("[update] Message: {}", redact_message(&message));
     match message {
         // ── Onboarding: capture server, PKCE, token validation ──
@@ -994,6 +1008,11 @@ pub fn update(state: &mut AppState, message: Message) -> iced::Task<Message> {
         | Message::ColorPassPalette(..)
         | Message::ProcessAllColors
         | Message::ColorSortChanged(_)
+        | Message::FilterModeChanged(_)
+        | Message::QueryTokenRemoved(_)
+        | Message::QuerySuggestionClicked(_)
+        | Message::CustomColorSelected
+        | Message::CustomColorTextChanged(_)
         | Message::ColorLevelChanged(_)
         | Message::OptionFilterToggled(_)
         | Message::SourceFilterToggled(_)
@@ -1038,6 +1057,13 @@ pub fn update(state: &mut AppState, message: Message) -> iced::Task<Message> {
         | Message::ArtistOpened(_)
         | Message::ArtistPfpLoaded(_)
         | Message::ArtistClosed => viewer::handle(state, message),
+
+        // ── Twitter viewer: combine split images, rotate ──
+        Message::ViewerMergeToggled(_)
+        | Message::ViewerRotate(_)
+        | Message::ViewerTransformReset
+        | Message::ViewerSplitDetected(..)
+        | Message::ViewerTransformReady(..) => transform::handle(state, message),
 
         // ── Twitter: client, feed, likes, replies ──
         Message::TwitterClientBuilt(_)
@@ -1121,6 +1147,7 @@ pub fn update(state: &mut AppState, message: Message) -> iced::Task<Message> {
         | Message::TileRowsChanged(..)
         | Message::BookmarkedDisplayChanged(_)
         | Message::BlurR18Changed(_)
+        | Message::TwitterViewerToolsChanged(_)
         | Message::MemoryPresetChanged(_)
         | Message::FpsLimitChanged(_)
         | Message::ThumbnailHighResChanged(_)

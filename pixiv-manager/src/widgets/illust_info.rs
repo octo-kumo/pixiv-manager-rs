@@ -121,13 +121,15 @@ pub fn illust_info(illust: &Illustration, text: TileText) -> iced::Element<'_, M
             // user's tweets, their image dynamics) — the id is namespaced
             // and the reducer dispatches on it.
             iced::widget::tooltip(
-                iced::widget::button(label)
+                crate::ui::button(label)
                     .on_press(Message::ArtistOpened(user.id))
                     .padding(iced::Padding::from([0, 2]))
                     .style(iced::widget::button::text),
                 iced::widget::text(user.name.clone()).size(text.author_size()),
                 iced::widget::tooltip::Position::Top,
             )
+            .style(crate::ui::tooltip)
+            .padding(4)
             .into()
         }
         None => {

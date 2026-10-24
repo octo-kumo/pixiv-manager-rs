@@ -30,6 +30,19 @@ impl Tristate {
     }
 }
 
+// ── Filter mode ───────────────────────────────────────────────────────
+
+/// How a tab's list is filtered and sorted. The two modes are mutually
+/// exclusive: `Classic` uses the search box + option/tag/tool controls + sort
+/// buttons, `Query` uses a single Danbooru-style text query
+/// (see [`crate::app::query`]) and ignores the classic controls.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum FilterMode {
+    #[default]
+    Classic,
+    Query,
+}
+
 // ── Source Filter ─────────────────────────────────────────────────────
 
 /// Which provider sources pass the filter (the mixed Bookmarks tab shows
@@ -93,6 +106,10 @@ pub struct OptionFilters {
 #[serde(default)]
 #[allow(dead_code)] // search_tools will be wired to UI
 pub struct FilterState {
+    /// Classic controls or the text query.
+    pub mode: FilterMode,
+    /// The text query of [`FilterMode::Query`].
+    pub query_text: String,
     pub search_text: String,
     /// Match the query against tag names (incl. translated names).
     pub search_tags: bool,
@@ -118,6 +135,8 @@ pub struct FilterState {
 impl Default for FilterState {
     fn default() -> Self {
         Self {
+            mode: FilterMode::Classic,
+            query_text: String::new(),
             search_text: String::new(),
             search_tags: true,
             search_author: true,
@@ -160,6 +179,9 @@ impl FilterState {
     /// Whether any filter constrains results (drives the "no matches — clear
     /// filters?" empty state).
     pub fn is_active(&self) -> bool {
+        if self.mode == FilterMode::Query {
+            return !crate::app::query::Query::parse(&self.query_text).is_empty();
+        }
         let OptionFilters {
             r18,
             ai,
@@ -192,9 +214,38 @@ impl FilterState {
         illusts: &[Illustration],
         downloaded: &std::collections::HashSet<u64>,
     ) -> Vec<Illustration> {
+        if self.mode == FilterMode::Query {
+            return self.apply_query(illusts, downloaded);
+        }
         illusts
             .iter()
             .filter(|i| self.matches(i, downloaded))
+            .cloned()
+            .collect()
+    }
+
+    /// Query mode: only the text query filters. The one exception is the
+    /// global "hide bookmarked items" preference (seeded into
+    /// `options.bookmarked`), which keeps applying unless the query itself
+    /// talks about `is:bookmarked`.
+    fn apply_query(
+        &self,
+        illusts: &[Illustration],
+        downloaded: &std::collections::HashSet<u64>,
+    ) -> Vec<Illustration> {
+        let query = crate::app::query::Query::parse(&self.query_text);
+        let ctx = crate::app::query::Context {
+            now: chrono::Utc::now(),
+            downloaded,
+        };
+        let bookmarked = if query.mentions_bookmarked() {
+            Tristate::Indeterminate
+        } else {
+            self.options.bookmarked
+        };
+        illusts
+            .iter()
+            .filter(|i| bookmarked.passes(i.bookmarked()) && query.matches(i, &ctx))
             .cloned()
             .collect()
     }

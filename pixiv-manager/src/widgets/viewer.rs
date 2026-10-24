@@ -36,7 +36,7 @@ pub fn viewer(state: &AppState) -> iced::Element<'_, Message> {
 
             // Close button floats at the bottom-right, on top of the comments.
             let close = iced::widget::container(
-                iced::widget::button(iced::widget::text("✕").size(14))
+                crate::ui::button(iced::widget::text("✕").size(14))
                     .on_press(Message::ViewerClosed)
                     .padding(iced::Padding::from([4, 10])),
             )
@@ -86,10 +86,7 @@ pub fn viewer(state: &AppState) -> iced::Element<'_, Message> {
     // The outer mouse_area captures every mouse event so the gallery behind
     // the overlay is neither visible-through nor interactive.
     let content = iced::widget::container(center)
-        .style(|theme| iced::widget::container::Style {
-            background: Some(iced::Background::Color(theme::bg(theme))),
-            ..Default::default()
-        })
+        .style(crate::ui::page)
         .width(iced::Length::Fill)
         .height(iced::Length::Fill);
 
@@ -116,7 +113,7 @@ fn image_with_overlay(
     let mut layers: Vec<iced::Element<'_, Message>> = Vec::new();
 
     // The image / placeholder.
-    match &state.viewer.handle {
+    match crate::app::update::transform::display_handle(state) {
         Some(handle) => {
             let image = iced::widget::image::viewer(handle.clone())
                 .content_fit(iced::ContentFit::Contain)
@@ -197,6 +194,11 @@ fn image_with_overlay(
         );
     }
 
+    // Combine / rotate tools (Twitter items).
+    if let Some(toolbar) = crate::widgets::viewer_toolbar::toolbar(state) {
+        layers.push(toolbar);
+    }
+
     // Palette swatches (MMCQ color extraction) floating at the bottom.
     if let Some(palette) = state.images.palettes.get(&state.viewer.illust_id) {
         let mut swatches: Vec<iced::Element<'_, Message>> = Vec::new();
@@ -251,7 +253,7 @@ fn page_selector(page: usize, total_pages: usize, value: &str) -> iced::Element<
                 Message::ViewerPageNavigate(crate::app::state::ViewerPageNav::Prev),
                 page > 0
             ),
-            iced::widget::text_input("–", value)
+            crate::ui::text_input("–", value)
                 .on_input(Message::ViewerPageInputChanged)
                 .on_submit(Message::ViewerPageSubmitted)
                 .size(12)
@@ -267,35 +269,25 @@ fn page_selector(page: usize, total_pages: usize, value: &str) -> iced::Element<
         .spacing(6)
         .align_y(iced::Alignment::Center),
     )
-    .padding(iced::Padding::from([2, 8]))
-    .style(|theme| iced::widget::container::Style {
-        background: Some(iced::Background::Color(iced::Color {
-            a: 0.7,
-            ..theme::panel(theme)
-        })),
-        border: iced::Border {
-            radius: 6.0.into(),
-            ..Default::default()
-        },
-        ..Default::default()
-    })
+    .padding(iced::Padding::from([4, 10]))
+    .style(crate::ui::glass_bar)
     .into()
 }
 
 /// An icon-only button (used by the page selector).
 fn icon_btn(label: &str, msg: Message, enabled: bool) -> iced::Element<'_, Message> {
-    let mut btn = iced::widget::button(iced::widget::text(label).size(13))
-        .padding(iced::Padding::from([1, 6]));
+    let mut btn =
+        crate::ui::button(iced::widget::text(label).size(13)).padding(iced::Padding::from([2, 8]));
     if enabled {
         btn = btn.on_press(msg);
     }
     // Disabled controls are visibly dimmed instead of looking clickable.
-    btn.style(|theme, status| iced::widget::button::Style {
-        text_color: match status {
-            iced::widget::button::Status::Disabled => theme::muted(theme),
-            _ => theme::fg(theme),
-        },
-        ..Default::default()
+    btn.style(|theme, status| {
+        let mut style = crate::ui::glass(false)(theme, status);
+        if status == iced::widget::button::Status::Disabled {
+            style.text_color = style.text_color.scale_alpha(0.35);
+        }
+        style
     })
     .into()
 }
@@ -315,21 +307,13 @@ fn download_icon(state: &AppState, illust_id: u64) -> iced::Element<'_, Message>
             .get(illust_id)
             .map(|s| s.progress_fraction())
             .unwrap_or(0.0);
-        iced::widget::button(iced::widget::text(format!("⏳{:.0}%", frac * 100.0)).size(12))
+        crate::ui::button(iced::widget::text(format!("⏳{:.0}%", frac * 100.0)).size(12))
             .width(iced::Length::Shrink)
             .height(26)
             .padding(iced::Padding::from([2, 8]))
-            .style(|theme, status| iced::widget::button::Style {
-                text_color: if status == iced::widget::button::Status::Disabled {
-                    crate::theme::muted(theme)
-                } else {
-                    crate::theme::fg(theme)
-                },
-                ..Default::default()
-            })
             .into()
     } else if state.jobs.downloads.is_completed(illust_id) {
-        iced::widget::button(
+        crate::ui::button(
             iced::widget::text("✓")
                 .size(14)
                 .color(crate::theme::SUCCESS),
@@ -339,7 +323,7 @@ fn download_icon(state: &AppState, illust_id: u64) -> iced::Element<'_, Message>
         .padding(iced::Padding::from([2, 10]))
         .into()
     } else {
-        iced::widget::button(iced::widget::text("⬇").size(14))
+        crate::ui::button(iced::widget::text("⬇").size(14))
             .on_press(Message::DownloadStarted(illust_id))
             .width(iced::Length::Shrink)
             .height(26)

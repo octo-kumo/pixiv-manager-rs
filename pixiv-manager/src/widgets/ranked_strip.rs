@@ -75,7 +75,7 @@ pub fn ranked_strip<'a>(
             .clip(true);
 
         tiles.push(
-            iced::widget::button(tile)
+            crate::ui::button(tile)
                 .on_press(Message::GalleryItemClicked(illust.id))
                 .padding(iced::Padding::ZERO)
                 .style(|theme, _| iced::widget::button::Style {
@@ -89,7 +89,7 @@ pub fn ranked_strip<'a>(
     iced::widget::container(
         iced::widget::column![
             header,
-            iced::widget::scrollable(iced::widget::Row::with_children(tiles).spacing(4)).direction(
+            crate::ui::scrollable(iced::widget::Row::with_children(tiles).spacing(4)).direction(
                 iced::widget::scrollable::Direction::Horizontal(
                     iced::widget::scrollable::Scrollbar::default(),
                 ),

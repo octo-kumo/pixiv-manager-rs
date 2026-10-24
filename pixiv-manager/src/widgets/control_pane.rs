@@ -1,4 +1,4 @@
-use crate::app::filter::{FilterState, SourceKey, Tristate};
+use crate::app::filter::{FilterMode, FilterState, SourceKey, Tristate};
 use crate::app::message::Message;
 use crate::app::sort::SortState;
 use crate::theme;
@@ -31,8 +31,18 @@ pub fn control_pane<'a>(
     autocomplete_selected: Option<usize>,
     api_prefs: Option<&'a crate::app::state::SearchApiPrefs>,
 ) -> iced::Element<'a, Message> {
+    let query_mode = filter.mode == FilterMode::Query;
+
     // ── Search bar + advanced-toggle + clear ──
-    let mut search = iced::widget::text_input("Search...", &filter.search_text)
+    let (placeholder, text) = if query_mode {
+        (
+            "tag  -excluded  ~either  user:name  views:>1000  is:r18  order:bookmarks",
+            &filter.query_text,
+        )
+    } else {
+        ("Search...", &filter.search_text)
+    };
+    let mut search = crate::ui::text_input(placeholder, text)
         .id(iced::widget::Id::new(SEARCH_INPUT_ID))
         .on_input(Message::SearchTextChanged)
         .size(12)
@@ -42,20 +52,27 @@ pub fn control_pane<'a>(
         search = search.on_submit(Message::AutocompleteCommit);
     }
 
-    let toggle = iced::widget::button(iced::widget::text("⚙ Filters").size(12))
-        .on_press(Message::ToggleAdvancedFilters)
-        .padding(iced::Padding::from([2, 8]));
+    let toggle = crate::ui::button(
+        iced::widget::text(if query_mode {
+            "? Syntax"
+        } else {
+            "⚙ Filters"
+        })
+        .size(12),
+    )
+    .on_press(Message::ToggleAdvancedFilters)
+    .padding(iced::Padding::from([4, 10]));
 
-    let clear = iced::widget::button(iced::widget::text("⌫ Clear filters").size(12))
+    let clear = crate::ui::button(iced::widget::text("⌫ Clear filters").size(12))
         .on_press(Message::ResetFilters)
-        .padding(iced::Padding::from([2, 8]));
+        .padding(iced::Padding::from([4, 10]));
 
     // Continuous "load all pages" button with progress (Search tab plus the
     // paginated Pixiv tabs) — sits inline with the filter buttons, not on
     // its own row.
     let auto_load_btn: Option<iced::Element<'a, Message>> = if show_auto_load {
         Some(if auto_load {
-            iced::widget::button(
+            crate::ui::button(
                 iced::widget::row![
                     iced::widget::text("⏳").size(12),
                     iced::widget::text(format!("loading… {auto_load_loaded}")).size(11),
@@ -64,15 +81,11 @@ pub fn control_pane<'a>(
                 .align_y(iced::Alignment::Center),
             )
             .on_press(Message::ToggleAutoLoad)
-            .padding(iced::Padding::from([2, 8]))
-            .style(|theme, _| iced::widget::button::Style {
-                background: Some(iced::Background::Color(theme::accent(theme))),
-                text_color: theme::fg(theme),
-                ..Default::default()
-            })
+            .padding(iced::Padding::from([4, 10]))
+            .style(crate::ui::primary)
             .into()
         } else {
-            iced::widget::button(
+            crate::ui::button(
                 iced::widget::text(if auto_load_loaded > 0 {
                     format!("▶ Load all ({auto_load_loaded})")
                 } else {
@@ -81,15 +94,24 @@ pub fn control_pane<'a>(
                 .size(11),
             )
             .on_press(Message::ToggleAutoLoad)
-            .padding(iced::Padding::from([2, 8]))
+            .padding(iced::Padding::from([4, 10]))
             .into()
         })
     } else {
         None
     };
 
-    let mut search_row_elems: Vec<iced::Element<'a, Message>> =
-        vec![search.into(), toggle.into(), clear.into()];
+    let mode_switch = iced::widget::row![
+        mode_button("Classic", !query_mode, FilterMode::Classic),
+        mode_button("Query", query_mode, FilterMode::Query),
+    ]
+    .spacing(2);
+    let mut search_row_elems: Vec<iced::Element<'a, Message>> = vec![
+        mode_switch.into(),
+        search.into(),
+        toggle.into(),
+        clear.into(),
+    ];
     if let Some(btn) = auto_load_btn {
         search_row_elems.push(btn);
     }
@@ -101,6 +123,40 @@ pub fn control_pane<'a>(
 
     // Autocomplete tag dropdown (search tab only). The keyboard-highlighted
     // entry (↑/↓) gets the accent border.
+    if query_mode {
+        let query = crate::app::query::Query::parse(&filter.query_text);
+        let suggestions = crate::app::query::suggest(&filter.query_text, gallery_tags);
+        if !suggestions.is_empty() {
+            let chips: Vec<iced::Element<'a, Message>> = suggestions
+                .into_iter()
+                .map(|s| {
+                    crate::ui::button(iced::widget::text(s.clone()).size(11))
+                        .on_press(Message::QuerySuggestionClicked(s))
+                        .padding(iced::Padding::from([4, 10]))
+                        .style(crate::ui::pill(None))
+                        .into()
+                })
+                .collect();
+            children.push(crate::widgets::wrap::wrap(chips).spacing(4.0).into());
+        }
+        if !query.tokens.is_empty() {
+            let chips: Vec<iced::Element<'static, Message>> = query
+                .tokens
+                .iter()
+                .enumerate()
+                .map(|(i, token)| query_chip(i, token))
+                .collect();
+            children.push(crate::widgets::wrap::wrap(chips).spacing(4.0).into());
+        }
+        if show_advanced {
+            children.push(query_help());
+        }
+        return iced::widget::Column::with_children(children)
+            .spacing(4)
+            .padding(iced::Padding::from([4, 8]))
+            .into();
+    }
+
     if is_search_tab && !autocomplete.is_empty() {
         let suggestions: Vec<iced::Element<'_, Message>> = autocomplete
             .iter()
@@ -108,21 +164,10 @@ pub fn control_pane<'a>(
             .enumerate()
             .map(|(i, tag)| {
                 let highlighted = autocomplete_selected == Some(i);
-                let mut btn = iced::widget::button(iced::widget::text(tag).size(11))
+                let mut btn = crate::ui::button(iced::widget::text(tag).size(11))
                     .on_press(Message::AutocompleteTagClicked(tag.clone()))
-                    .padding(iced::Padding::from([2, 8]));
-                if highlighted {
-                    btn = btn.style(|theme, _| iced::widget::button::Style {
-                        background: Some(iced::Background::Color(theme::panel(theme))),
-                        text_color: theme::fg(theme),
-                        border: iced::Border {
-                            color: theme::accent(theme),
-                            width: 1.5,
-                            radius: 4.0.into(),
-                        },
-                        ..Default::default()
-                    });
-                }
+                    .padding(iced::Padding::from([4, 10]));
+                btn = btn.style(crate::ui::chip(highlighted));
                 btn.into()
             })
             .collect();
@@ -130,14 +175,7 @@ pub fn control_pane<'a>(
             iced::widget::container(iced::widget::Column::with_children(suggestions).spacing(1))
                 .width(iced::Length::Fill)
                 .padding(iced::Padding::from([2, 4]))
-                .style(|theme| iced::widget::container::Style {
-                    background: Some(iced::Background::Color(theme::panel(theme))),
-                    border: iced::Border {
-                        radius: 4.0.into(),
-                        ..Default::default()
-                    },
-                    ..Default::default()
-                })
+                .style(crate::ui::card)
                 .into(),
         );
     }
@@ -245,10 +283,10 @@ pub fn control_pane<'a>(
         for (label, value) in sort_options {
             let selected = prefs.sort == *value;
             sort_btns.push(
-                iced::widget::button(iced::widget::text(*label).size(11))
+                crate::ui::button(iced::widget::text(*label).size(11))
                     .on_press(Message::ApiSortChanged(*value))
-                    .padding(iced::Padding::from([2, 8]))
-                    .style(move |theme, _| pick_style(theme, selected))
+                    .padding(iced::Padding::from([4, 10]))
+                    .style(crate::ui::chip(selected))
                     .into(),
             );
         }
@@ -274,10 +312,10 @@ pub fn control_pane<'a>(
         for (label, value) in target_options {
             let selected = prefs.target == *value;
             target_btns.push(
-                iced::widget::button(iced::widget::text(*label).size(11))
+                crate::ui::button(iced::widget::text(*label).size(11))
                     .on_press(Message::ApiTargetChanged(*value))
-                    .padding(iced::Padding::from([2, 8]))
-                    .style(move |theme, _| pick_style(theme, selected))
+                    .padding(iced::Padding::from([4, 10]))
+                    .style(crate::ui::chip(selected))
                     .into(),
             );
         }
@@ -288,7 +326,7 @@ pub fn control_pane<'a>(
                 iced::widget::Space::new().width(12),
                 iced::widget::Row::with_children(target_btns).spacing(2),
                 iced::widget::Space::new().width(12),
-                iced::widget::checkbox(prefs.translated)
+                crate::ui::checkbox(prefs.translated)
                     .label("translated tags")
                     .text_size(11)
                     .size(14)
@@ -312,7 +350,7 @@ pub fn control_pane<'a>(
                 .copied()
                 .unwrap_or(Tristate::Indeterminate);
             tool_buttons.push(
-                iced::widget::button(
+                crate::ui::button(
                     iced::widget::row![
                         tristate::tristate_icon(st),
                         iced::widget::text(tool).size(10),
@@ -321,17 +359,8 @@ pub fn control_pane<'a>(
                     .align_y(iced::Alignment::Center),
                 )
                 .on_press(Message::ToolFilterToggled(tool.clone()))
-                .padding(iced::Padding::from([2, 6]))
-                .style(|theme, _| iced::widget::button::Style {
-                    background: Some(iced::Background::Color(theme::panel(theme))),
-                    text_color: theme::fg(theme),
-                    border: iced::Border {
-                        color: theme::border(theme),
-                        width: 1.0,
-                        radius: 4.0.into(),
-                    },
-                    ..Default::default()
-                })
+                .padding(iced::Padding::from([3, 8]))
+                .style(crate::ui::chip(false))
                 .into(),
             );
         }
@@ -365,7 +394,7 @@ fn checkbox<'a>(
     checked: bool,
     on_toggle: impl Fn(bool) -> Message + 'a,
 ) -> iced::Element<'a, Message> {
-    iced::widget::checkbox(checked)
+    crate::ui::checkbox(checked)
         .label(label)
         .text_size(11.0)
         .size(14.0)
@@ -373,36 +402,11 @@ fn checkbox<'a>(
         .into()
 }
 
-/// Button style for a selected vs unselected choice chip (used by the
-/// server-side sort/match pickers).
-fn pick_style(theme: &iced::Theme, selected: bool) -> iced::widget::button::Style {
-    if selected {
-        iced::widget::button::Style {
-            background: Some(iced::Background::Color(theme::panel(theme))),
-            text_color: theme::fg(theme),
-            border: iced::Border {
-                color: theme::accent(theme),
-                width: 1.5,
-                radius: 4.0.into(),
-            },
-            ..Default::default()
-        }
-    } else {
-        iced::widget::button::Style {
-            background: Some(iced::Background::Color(
-                theme::panel(theme).scale_alpha(0.45),
-            )),
-            text_color: theme::muted(theme),
-            ..Default::default()
-        }
-    }
-}
-
 /// A filter button with its label inside and its tristate state shown as an
 /// icon (✓ selected / ✗ excluded / ─ indeterminate). Colors derive from the
 /// active theme so the foreground stays readable in dark and light modes.
 fn option_btn(label: &str, state: Tristate, msg: Message) -> iced::Element<'_, Message> {
-    iced::widget::button(
+    crate::ui::button(
         iced::widget::row![
             tristate::tristate_icon(state),
             iced::widget::text(label).size(11),
@@ -411,24 +415,15 @@ fn option_btn(label: &str, state: Tristate, msg: Message) -> iced::Element<'_, M
         .align_y(iced::Alignment::Center),
     )
     .on_press(msg)
-    .padding(iced::Padding::from([3, 8]))
-    .style(|theme, _| iced::widget::button::Style {
-        background: Some(iced::Background::Color(theme::panel(theme))),
-        text_color: theme::fg(theme),
-        border: iced::Border {
-            color: theme::border(theme),
-            width: 1.0,
-            radius: 4.0.into(),
-        },
-        ..Default::default()
-    })
+    .padding(iced::Padding::from([4, 10]))
+    .style(crate::ui::chip(state != Tristate::Indeterminate))
     .into()
 }
 
 /// A source chip of the Bookmarks tab's multi-select source filter: filled
 /// (✓) when the source is shown, hollow when it is filtered out.
 fn source_chip(label: &'static str, on: bool, key: SourceKey) -> iced::Element<'static, Message> {
-    iced::widget::button(
+    crate::ui::button(
         iced::widget::row![
             iced::widget::text(if on { "✓" } else { "✗" }).size(10),
             iced::widget::text(label).size(11),
@@ -437,28 +432,121 @@ fn source_chip(label: &'static str, on: bool, key: SourceKey) -> iced::Element<'
         .align_y(iced::Alignment::Center),
     )
     .on_press(Message::SourceFilterToggled(key))
-    .padding(iced::Padding::from([2, 7]))
-    .style(move |theme, _| {
-        if on {
-            iced::widget::button::Style {
-                background: Some(iced::Background::Color(theme::panel(theme))),
-                text_color: theme::fg(theme),
-                border: iced::Border {
-                    color: theme::accent(theme),
-                    width: 1.0,
-                    radius: 4.0.into(),
-                },
-                ..Default::default()
+    .padding(iced::Padding::from([3, 9]))
+    .style(crate::ui::chip(on))
+    .into()
+}
+
+/// One half of the Classic / Query switch.
+fn mode_button(
+    label: &'static str,
+    selected: bool,
+    mode: FilterMode,
+) -> iced::Element<'static, Message> {
+    crate::ui::button(iced::widget::text(label).size(11))
+        .on_press(Message::FilterModeChanged(mode))
+        .padding(iced::Padding::from([4, 12]))
+        .style(move |theme, status| {
+            if selected {
+                crate::ui::primary(theme, status)
+            } else {
+                crate::ui::ghost(theme, status)
             }
-        } else {
-            iced::widget::button::Style {
-                background: Some(iced::Background::Color(
-                    theme::panel(theme).scale_alpha(0.45),
-                )),
-                text_color: theme::muted(theme),
-                ..Default::default()
-            }
-        }
-    })
+        })
+        .into()
+}
+
+/// A parsed query token as a chip; clicking it removes the token. Colors tell
+/// the role at a glance: green include, red exclude, amber any-of, accent
+/// sort order, red-filled for a token that could not be understood (the
+/// tooltip says why).
+fn query_chip(index: usize, token: &crate::app::query::Token) -> iced::Element<'static, Message> {
+    use crate::app::query::Kind;
+    let (color, invalid): (iced::Color, Option<String>) = match &token.kind {
+        Kind::Include(_) => (theme::SUCCESS, None),
+        Kind::Exclude(_) => (theme::DANGER, None),
+        Kind::AnyOf(_) => (iced::Color::from_rgb(0.85, 0.6, 0.15), None),
+        Kind::Order(..) => (iced::Color::from_rgb(0.45, 0.45, 0.9), None),
+        Kind::Invalid(reason) => (theme::DANGER, Some(reason.clone())),
+    };
+    let chip = crate::ui::button(
+        iced::widget::row![
+            iced::widget::text(token.raw.clone()).size(11),
+            iced::widget::text("×").size(11),
+        ]
+        .spacing(5),
+    )
+    .on_press(Message::QueryTokenRemoved(index))
+    .padding(iced::Padding::from([3, 10]))
+    .style(crate::ui::pill(Some(color)));
+    match invalid {
+        Some(reason) => iced::widget::tooltip(
+            chip,
+            iced::widget::container(iced::widget::text(reason).size(11))
+                .padding(iced::Padding::from([3, 8]))
+                .style(crate::ui::tooltip),
+            iced::widget::tooltip::Position::Bottom,
+        )
+        .into(),
+        None => chip.into(),
+    }
+}
+
+/// The query syntax cheat sheet (shown by the "? Syntax" button).
+fn query_help<'a>() -> iced::Element<'a, Message> {
+    let line = |term: &'static str, what: &'static str| {
+        iced::widget::row![
+            iced::widget::text(term)
+                .size(11)
+                .font(iced::Font::MONOSPACE)
+                .width(340),
+            iced::widget::text(what).size(11),
+        ]
+        .spacing(8)
+    };
+    iced::widget::container(
+        iced::widget::column![
+            iced::widget::text("Every word must match. Click a chip to remove it.").size(11),
+            line(
+                "blue_sky",
+                "has the tag exactly (_ = space, * = wildcard: blue*)"
+            ),
+            line("-boy", "does NOT have the tag"),
+            line("~cat ~dog", "has at least one of the ~ tags"),
+            line(
+                "user:name  title:word  caption:word",
+                "text contains (quote spaces: title:\"a b\")"
+            ),
+            line(
+                "tool:clipstudio  source:pixiv|twitter|bilibili",
+                "tool / site"
+            ),
+            line(
+                "views:>1000  bookmarks:100..500  bpv:>=5%",
+                "numbers: > >= < <= = a..b, 2k = 2000"
+            ),
+            line(
+                "width:>=2k  height:  pixels:  pages:>1  ratio:>1",
+                "size / pages / width÷height"
+            ),
+            line(
+                "age:<7d  date:2024-05  date:>=2024-01-01",
+                "posted within / on / after (h d w mo y)"
+            ),
+            line(
+                "is:r18 -is:ai is:bookmarked is:landscape",
+                "also portrait visible restricted missing downloaded multi"
+            ),
+            line(
+                "order:bookmarks  order:date_asc",
+                "sort (views bookmarks bpv date id pixels pages sanity; _asc)"
+            ),
+            line("id:>123456", "provider-local work id"),
+        ]
+        .spacing(2),
+    )
+    .padding(iced::Padding::from([6, 10]))
+    .width(iced::Length::Fill)
+    .style(crate::ui::card)
     .into()
 }

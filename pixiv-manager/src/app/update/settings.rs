@@ -177,6 +177,12 @@ pub(super) fn handle(state: &mut AppState, message: Message) -> iced::Task<Messa
             iced::Task::batch([schedule_config_flush()])
         }
 
+        Message::TwitterViewerToolsChanged(on) => {
+            state.settings.twitter_viewer_tools = on;
+            mark_config_dirty(state);
+            schedule_config_flush()
+        }
+
         Message::BlurR18Changed(on) => {
             state.settings.blur_r18 = on;
             mark_config_dirty(state);

@@ -57,7 +57,7 @@ pub fn illust_detail<'a>(
             author_row_children.push(iced::widget::text(label).size(12).into());
         } else {
             author_row_children.push(
-                iced::widget::button(iced::widget::text(user.name.clone()).size(12))
+                crate::ui::button(iced::widget::text(user.name.clone()).size(12))
                     .on_press(Message::ArtistOpened(user.id))
                     .padding(iced::Padding::from([1, 2]))
                     .style(iced::widget::button::text)
@@ -72,7 +72,7 @@ pub fn illust_detail<'a>(
         );
         if !direct {
             rows.push(
-                iced::widget::button(
+                crate::ui::button(
                     iced::widget::text(if user.followed() {
                         "☑ Following"
                     } else {
@@ -81,21 +81,8 @@ pub fn illust_detail<'a>(
                     .size(12),
                 )
                 .on_press(Message::FollowToggled(user.id))
-                .padding(iced::Padding::from([3, 8]))
-                .style(|theme, _| iced::widget::button::Style {
-                    background: Some(iced::Background::Color(theme::panel(theme))),
-                    text_color: if user.followed() {
-                        theme::accent(theme)
-                    } else {
-                        theme::fg(theme)
-                    },
-                    border: iced::Border {
-                        color: theme::border(theme),
-                        width: 1.0,
-                        radius: 4.0.into(),
-                    },
-                    ..Default::default()
-                })
+                .padding(iced::Padding::from([3, 10]))
+                .style(crate::ui::chip(user.followed()))
                 .into(),
             );
         }
@@ -103,7 +90,7 @@ pub fn illust_detail<'a>(
 
     // Clickable ID (opens in browser: pixiv artwork page or the tweet).
     rows.push(
-        iced::widget::button(
+        crate::ui::button(
             iced::widget::text(format!("#{}", crate::media::native_id(illust.id)))
                 .size(11)
                 .color(theme::accent(t)),
@@ -126,13 +113,16 @@ pub fn illust_detail<'a>(
     let copy_tip = provider.copy_url_tip();
     let mut action_row = iced::widget::row![
         iced::widget::tooltip(
-            iced::widget::button(iced::widget::text(bookmark_label).size(12))
+            crate::ui::button(iced::widget::text(bookmark_label).size(12))
                 .on_press(Message::BookmarkToggled(illust.id))
                 .width(90)
-                .height(26),
+                .height(26)
+                .style(crate::ui::chip(bookmarked)),
             bookmark_tip,
             iced::widget::tooltip::Position::Top,
-        ),
+        )
+        .style(crate::ui::tooltip)
+        .padding(4),
         download,
         icon_action(
             "⧉",
@@ -213,31 +203,16 @@ pub fn illust_detail<'a>(
                         iced::widget::container(
                             iced::widget::text(format!("#{}", t.name)).size(10),
                         )
-                        .padding(iced::Padding::from([1, 4]))
-                        .style(|theme| iced::widget::container::Style {
-                            background: Some(iced::Background::Color(theme::panel(theme))),
-                            border: iced::Border {
-                                radius: 3.0.into(),
-                                ..Default::default()
-                            },
-                            ..Default::default()
-                        })
+                        .padding(iced::Padding::from([2, 8]))
+                        .style(crate::ui::tag)
                         .into(),
                     )
                 } else {
                     Some(
-                        iced::widget::button(iced::widget::text(&t.name).size(10))
+                        crate::ui::button(iced::widget::text(&t.name).size(10))
                             .on_press(Message::TagSearchRequested(t.name.clone()))
-                            .padding(iced::Padding::from([1, 4]))
-                            .style(|theme, _| iced::widget::button::Style {
-                                background: Some(iced::Background::Color(theme::panel(theme))),
-                                text_color: theme::fg(theme),
-                                border: iced::Border {
-                                    radius: 3.0.into(),
-                                    ..Default::default()
-                                },
-                                ..Default::default()
-                            })
+                            .padding(iced::Padding::from([2, 8]))
+                            .style(crate::ui::pill(None))
                             .into(),
                     )
                 }
@@ -256,15 +231,8 @@ pub fn illust_detail<'a>(
             .iter()
             .map(|tool| {
                 iced::widget::container(iced::widget::text(tool).size(10))
-                    .padding(iced::Padding::from([1, 4]))
-                    .style(|theme| iced::widget::container::Style {
-                        background: Some(iced::Background::Color(theme::panel(theme))),
-                        border: iced::Border {
-                            radius: 3.0.into(),
-                            ..Default::default()
-                        },
-                        ..Default::default()
-                    })
+                    .padding(iced::Padding::from([2, 8]))
+                    .style(crate::ui::tag)
                     .into()
             })
             .collect();
@@ -304,9 +272,9 @@ fn icon_action(
     glyph: &'static str,
     tooltip: &'static str,
     msg: Option<Message>,
-    disabled: bool,
+    _disabled: bool,
 ) -> iced::Element<'static, Message> {
-    let mut btn = iced::widget::button(
+    let mut btn = crate::ui::button(
         iced::widget::container(iced::widget::text(glyph).size(13))
             .center_x(iced::Length::Shrink)
             .center_y(iced::Length::Shrink),
@@ -317,13 +285,10 @@ fn icon_action(
     if let Some(msg) = msg {
         btn = btn.on_press(msg);
     }
-    if disabled {
-        btn = btn.style(|theme, _| iced::widget::button::Style {
-            text_color: theme::muted(theme),
-            ..Default::default()
-        });
-    }
-    iced::widget::tooltip(btn, tooltip, iced::widget::tooltip::Position::Top).into()
+    iced::widget::tooltip(btn, tooltip, iced::widget::tooltip::Position::Top)
+        .style(crate::ui::tooltip)
+        .padding(4)
+        .into()
 }
 
 /// Cap text at `max` chars, appending an ellipsis when truncated.

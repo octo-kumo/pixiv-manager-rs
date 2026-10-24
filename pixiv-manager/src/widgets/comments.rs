@@ -63,7 +63,7 @@ pub fn comments_with_label<'a>(
         .spacing(0)
         .padding(0);
 
-    iced::widget::container(iced::widget::scrollable(list).on_scroll(
+    iced::widget::container(crate::ui::scrollable(list).on_scroll(
         |viewport: iced::widget::scrollable::Viewport| {
             if viewport.relative_offset().y > 0.85 {
                 Message::CommentsLoadMore
@@ -99,6 +99,8 @@ fn comment_row<'a>(
             iced::widget::text(d.format("%Y-%m-%d %H:%M").to_string()).size(11),
             iced::widget::tooltip::Position::Top,
         )
+        .style(crate::ui::tooltip)
+        .padding(4)
         .into(),
         None => iced::widget::text("").into(),
     };
@@ -182,10 +184,7 @@ fn comment_row<'a>(
             background: Some(iced::Background::Color(if index % 2 == 0 {
                 theme::bg(theme)
             } else {
-                iced::Color {
-                    a: 0.5,
-                    ..theme::panel(theme)
-                }
+                theme::panel(theme).scale_alpha(0.55)
             })),
             ..Default::default()
         })

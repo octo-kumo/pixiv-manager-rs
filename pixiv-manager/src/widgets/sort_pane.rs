@@ -5,16 +5,10 @@ use crate::theme;
 pub fn sort_pane(sort_state: &SortState) -> iced::Element<'_, Message> {
     // In multi-sort mode the active rules are shown in selection order (rule 1
     // is the primary key); otherwise a single "Sort ↓/↑" label.
-    let mut multi_btn = iced::widget::button(iced::widget::text("Multi").size(12))
+    let multi_btn = crate::ui::button(iced::widget::text("Multi").size(12))
         .on_press(Message::MultiSortToggled)
-        .padding(iced::Padding::from([2, 6]));
-    if sort_state.multi_sort {
-        multi_btn = multi_btn.style(|theme, _| iced::widget::button::Style {
-            background: Some(iced::Background::Color(theme::accent(theme))),
-            text_color: theme::fg(theme),
-            ..Default::default()
-        });
-    }
+        .padding(iced::Padding::from([3, 10]))
+        .style(crate::ui::chip(sort_state.multi_sort));
 
     let dir_text = if sort_state.multi_sort {
         let mut labels: Vec<String> = Vec::new();
@@ -46,7 +40,7 @@ pub fn sort_pane(sort_state: &SortState) -> iced::Element<'_, Message> {
         (SortKey::Hue, "Hue"),
     ];
 
-    let mut row = iced::widget::Row::new().spacing(2);
+    let mut row = iced::widget::Row::new().spacing(3);
 
     for (key, label) in &sort_buttons {
         let active_dir = sort_state
@@ -58,26 +52,11 @@ pub fn sort_pane(sort_state: &SortState) -> iced::Element<'_, Message> {
 
         let (icon, _color) = sort_direction_icon_label(active_dir);
 
-        let mut btn = iced::widget::button(iced::widget::text(format!("{label} {icon}")).size(10))
-            .padding(iced::Padding::from([2, 5]));
+        let btn = crate::ui::button(iced::widget::text(format!("{label} {icon}")).size(10))
+            .padding(iced::Padding::from([3, 8]))
+            .style(crate::ui::chip(active_dir != SortDirection::Undefined));
 
-        if active_dir != SortDirection::Undefined {
-            btn = btn.style(|theme, _| iced::widget::button::Style {
-                background: Some(iced::Background::Color(theme::accent(theme))),
-                text_color: theme::fg(theme),
-                ..Default::default()
-            });
-        } else {
-            // Inactive: dimmed, so active sorts stand out.
-            btn = btn.style(|theme, _| iced::widget::button::Style {
-                background: None,
-                text_color: theme::muted(theme).scale_alpha(0.9),
-                ..Default::default()
-            });
-        }
-
-        btn = btn.on_press(Message::SortKeyClicked(*key));
-        row = row.push(btn);
+        row = row.push(btn.on_press(Message::SortKeyClicked(*key)));
     }
 
     // Color-sort extras: a swatch picker + level selector, shown only while an
@@ -93,9 +72,10 @@ pub fn sort_pane(sort_state: &SortState) -> iced::Element<'_, Message> {
     if has_color_sort {
         let mut swatches: Vec<iced::Element<'_, Message>> = Vec::new();
         for color in PRESET_COLORS {
-            let selected = sort_state.color == Some(*color);
+            let selected =
+                sort_state.custom_color_text.is_none() && sort_state.color == Some(*color);
             let color = *color;
-            let swatch = iced::widget::button(iced::widget::text("").width(18).height(18))
+            let swatch = crate::ui::button(iced::widget::text("").width(18).height(18))
                 .on_press(Message::ColorSortChanged(color))
                 .padding(iced::Padding::ZERO)
                 .style(move |theme, _| iced::widget::button::Style {
@@ -106,25 +86,83 @@ pub fn sort_pane(sort_state: &SortState) -> iced::Element<'_, Message> {
                     ))),
                     border: iced::Border {
                         color: if selected {
-                            iced::Color::WHITE
+                            theme::fg(theme)
                         } else {
                             theme::border(theme)
                         },
                         width: if selected { 2.0 } else { 1.0 },
-                        radius: 3.0.into(),
+                        radius: 9.0.into(),
                     },
                     ..Default::default()
                 });
             swatches.push(swatch.into());
         }
+        // Custom color: looks like a preset swatch, tinted by the current
+        // color; selecting it reveals a text input (red outline = unparsable).
+        let custom_selected = sort_state.custom_color_text.is_some();
+        let custom_rgb = sort_state.color.unwrap_or([128, 128, 128]);
+        let custom_bg = iced::Color::from_rgb8(custom_rgb[0], custom_rgb[1], custom_rgb[2]);
+        // Pick a readable icon color against the swatch.
+        let luma = 0.299 * custom_bg.r + 0.587 * custom_bg.g + 0.114 * custom_bg.b;
+        let icon_color = if luma > 0.55 {
+            iced::Color::BLACK
+        } else {
+            iced::Color::WHITE
+        };
+        swatches.push(
+            crate::ui::button(
+                iced::widget::text("✎")
+                    .size(12)
+                    .color(icon_color)
+                    .width(18)
+                    .height(18)
+                    .align_x(iced::Alignment::Center)
+                    .align_y(iced::Alignment::Center),
+            )
+            .on_press(Message::CustomColorSelected)
+            .padding(iced::Padding::ZERO)
+            .style(move |theme, _| iced::widget::button::Style {
+                background: Some(iced::Background::Color(custom_bg)),
+                border: iced::Border {
+                    color: if custom_selected {
+                        theme::fg(theme)
+                    } else {
+                        theme::border(theme)
+                    },
+                    width: if custom_selected { 2.0 } else { 1.0 },
+                    radius: 9.0.into(),
+                },
+                ..Default::default()
+            })
+            .into(),
+        );
+        if let Some(text) = &sort_state.custom_color_text {
+            let invalid = crate::app::sort::parse_color(text).is_none();
+            swatches.push(
+                crate::ui::text_input("#rrggbb, rgb(…)", text)
+                    .on_input(Message::CustomColorTextChanged)
+                    .size(11)
+                    .padding(iced::Padding::from([2, 6]))
+                    .width(130)
+                    .style(move |theme, status| {
+                        let mut style = crate::ui::input(theme, status);
+                        if invalid {
+                            style.border.color = theme::DANGER;
+                            style.border.width = 1.5;
+                        }
+                        style
+                    })
+                    .into(),
+            );
+        }
         let level = sort_state.color_level.clamp(1, 5);
         let level_row = iced::widget::row![
             iced::widget::text("Level").size(11),
-            iced::widget::button(iced::widget::text("−").size(13))
+            crate::ui::button(iced::widget::text("−").size(13))
                 .on_press_maybe((level > 1).then_some(Message::ColorLevelChanged(level - 1)))
                 .padding(iced::Padding::from([1, 6])),
             iced::widget::text(format!("{}", level)).size(11).width(16),
-            iced::widget::button(iced::widget::text("+").size(13))
+            crate::ui::button(iced::widget::text("+").size(13))
                 .on_press_maybe((level < 5).then_some(Message::ColorLevelChanged(level + 1)))
                 .padding(iced::Padding::from([1, 6])),
         ]

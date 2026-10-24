@@ -23,7 +23,7 @@ pub fn tristate_icon(state: Tristate) -> iced::Element<'static, Message> {
 pub fn tristate_checkbox(state: Tristate, on_click: Message) -> iced::Element<'static, Message> {
     let (label, color) = tristate_glyph(state);
 
-    iced::widget::button(iced::widget::text(label).size(14).color(color))
+    crate::ui::button(iced::widget::text(label).size(14).color(color))
         .on_press(on_click)
         .padding(iced::Padding::from([2, 6]))
         .style(|theme, _| iced::widget::button::Style {

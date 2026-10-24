@@ -38,6 +38,7 @@ fn bench_sort(c: &mut Criterion) {
         ],
         color: None,
         color_level: 0,
+        custom_color_text: None,
     };
 
     let mut group = c.benchmark_group("sort");

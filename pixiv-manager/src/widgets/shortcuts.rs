@@ -46,15 +46,7 @@ pub fn shortcuts_overlay(t: &iced::Theme) -> iced::Element<'static, Message> {
         .spacing(10),
     )
     .padding(16)
-    .style(|theme| iced::widget::container::Style {
-        background: Some(iced::Background::Color(theme::panel(theme))),
-        border: iced::Border {
-            color: theme::border(theme),
-            width: 1.0,
-            radius: 8.0.into(),
-        },
-        ..Default::default()
-    });
+    .style(crate::ui::card);
 
     // Full-screen click-catcher so clicks outside dismiss nothing accidentally
     // but the panel floats above everything.
@@ -63,5 +55,6 @@ pub fn shortcuts_overlay(t: &iced::Theme) -> iced::Element<'static, Message> {
         .center_y(iced::Length::Fill)
         .width(iced::Length::Fill)
         .height(iced::Length::Fill)
+        .style(crate::ui::scrim)
         .into()
 }

@@ -55,7 +55,8 @@ pub fn view(state: &AppState) -> iced::Element<'_, Message> {
         settings_button(),
     ]
     .spacing(2)
-    .padding(iced::Padding::from([2, 6]));
+    .align_y(iced::Alignment::Center)
+    .padding(iced::Padding::from([6, 10]));
 
     let active = state.active_tab_data();
     let (illusts, filters, sort) = (&active.filtered, &active.filters, &active.sort);
@@ -167,7 +168,7 @@ pub fn view(state: &AppState) -> iced::Element<'_, Message> {
                     iced::widget::text("Nothing fits the current filters.")
                         .size(12)
                         .color(theme::muted(&theme)),
-                    iced::widget::button(iced::widget::text("⌫ Clear filters").size(12))
+                    crate::ui::button(iced::widget::text("⌫ Clear filters").size(12))
                         .on_press(Message::ResetFilters)
                         .padding(iced::Padding::from([4, 12])),
                 ])
@@ -219,19 +220,11 @@ pub fn view(state: &AppState) -> iced::Element<'_, Message> {
     // above the tiles when only a pagination step failed.
     let content: iced::Element<'_, Message> = if let Some(error) = &active.error {
         let retry = || {
-            iced::widget::button(iced::widget::text("Retry").size(12))
+            crate::ui::button(iced::widget::text("Retry").size(12))
                 .on_press(Message::LoadMore)
                 .padding(iced::Padding::from([4, 12]))
         };
-        let error_style = |_theme: &iced::Theme| iced::widget::container::Style {
-            background: Some(iced::Color::from_rgb(0.30, 0.10, 0.10).into()),
-            border: iced::Border {
-                radius: 4.0.into(),
-                ..Default::default()
-            },
-            text_color: Some(iced::Color::from_rgb(1.0, 0.92, 0.92)),
-            ..iced::widget::container::Style::default()
-        };
+        let error_style = crate::ui::error_banner;
         if active.filtered.is_empty() {
             // Nothing loaded: the error replaces the empty grid.
             iced::widget::container(
@@ -384,19 +377,16 @@ pub fn view(state: &AppState) -> iced::Element<'_, Message> {
                 iced::widget::row![
                     iced::widget::text(format!("⚠ {error}")).size(13),
                     iced::widget::Space::new().width(iced::Length::Fill),
-                    iced::widget::button(iced::widget::text("✕").size(12))
+                    crate::ui::button(iced::widget::text("✕").size(12))
                         .on_press(Message::DismissError)
-                        .padding(iced::Padding::from([2, 6])),
+                        .padding(iced::Padding::from([2, 8]))
+                        .style(crate::ui::ghost),
                 ]
                 .spacing(8),
             )
             .align_top(iced::Length::Fill)
             .padding(8)
-            .style(|_theme: &iced::Theme| iced::widget::container::Style {
-                background: Some(iced::Color::from_rgb(0.30, 0.10, 0.10).into()),
-                text_color: Some(iced::Color::from_rgb(1.0, 0.92, 0.92)),
-                ..iced::widget::container::Style::default()
-            })
+            .style(crate::ui::error_banner)
             .into(),
         );
     }
@@ -411,53 +401,18 @@ pub fn view(state: &AppState) -> iced::Element<'_, Message> {
 
 fn tab_button(label: &str, tab: Tab, active: Tab) -> iced::Element<'_, Message> {
     let is_active = tab == active;
-    // Segmented-tab look: active tab gets a subtle panel background + an
-    // accent underline; inactive tabs are dimmed.
-    let content = iced::widget::column![
-        iced::widget::container(iced::widget::text(label).size(12))
-            .padding(iced::Padding::from([3, 10])),
-        iced::widget::container(if is_active {
-            iced::widget::container(iced::widget::text("")).width(iced::Length::Fill)
-        } else {
-            iced::widget::container(iced::widget::text(""))
-        })
-        .height(2)
-        .width(iced::Length::Fill)
-        .style(move |theme| iced::widget::container::Style {
-            background: Some(iced::Background::Color(if is_active {
-                crate::theme::accent(theme)
-            } else {
-                iced::Color::TRANSPARENT
-            })),
-            ..Default::default()
-        }),
-    ]
-    .spacing(0);
-
-    iced::widget::button(content)
-        .on_press(Message::TabSelected(tab))
-        .padding(iced::Padding::ZERO)
-        .style(move |theme, _| iced::widget::button::Style {
-            background: Some(iced::Background::Color(if is_active {
-                iced::Color {
-                    a: 0.12,
-                    ..crate::theme::accent(theme)
-                }
-            } else {
-                iced::Color::TRANSPARENT
-            })),
-            text_color: if is_active {
-                crate::theme::fg(theme)
-            } else {
-                crate::theme::muted(theme)
-            },
-            border: iced::Border {
-                radius: 6.0.into(),
-                ..Default::default()
-            },
-            ..Default::default()
-        })
-        .into()
+    crate::ui::button(iced::widget::text(label).size(12).font(if is_active {
+        iced::Font {
+            weight: iced::font::Weight::Semibold,
+            ..iced::Font::DEFAULT
+        }
+    } else {
+        iced::Font::DEFAULT
+    }))
+    .on_press(Message::TabSelected(tab))
+    .padding(iced::Padding::from([5, 12]))
+    .style(crate::ui::tab(is_active))
+    .into()
 }
 
 /// Toolbar for the Bookmarks tab: sync the local library and download all
@@ -466,32 +421,32 @@ fn bookmark_toolbar(state: &AppState) -> iced::Element<'_, Message> {
     let mut children: Vec<iced::Element<'_, Message>> = Vec::new();
 
     let sync_btn: iced::Element<'_, Message> = if state.jobs.bookmark_sync.running {
-        iced::widget::button(iced::widget::text("✕ Stop sync").size(12))
+        crate::ui::button(iced::widget::text("✕ Stop sync").size(12))
             .on_press(Message::CancelBookmarkSync)
             .into()
     } else {
-        iced::widget::button(iced::widget::text("🔄 Sync bookmarks").size(12))
+        crate::ui::button(iced::widget::text("🔄 Sync bookmarks").size(12))
             .on_press(Message::StartBookmarkSync)
             .into()
     };
     let download_btn: iced::Element<'_, Message> =
         if state.jobs.download_job.running || !state.jobs.download_queue.is_finished() {
-            iced::widget::button(iced::widget::text("✕ Stop downloads").size(12))
+            crate::ui::button(iced::widget::text("✕ Stop downloads").size(12))
                 .on_press(Message::CancelDownloadAll)
                 .into()
         } else {
-            iced::widget::button(iced::widget::text("⬇ Download all").size(12))
+            crate::ui::button(iced::widget::text("⬇ Download all").size(12))
                 .on_press(Message::StartDownloadAll)
                 .into()
         };
     let manage_btn: iced::Element<'_, Message> =
-        iced::widget::button(iced::widget::text("Manage").size(12))
+        crate::ui::button(iced::widget::text("Manage").size(12))
             .on_press(Message::ToggleDownloadManager)
             .into();
     let process_btn: iced::Element<'_, Message> = if state.images.color_processing {
-        iced::widget::button(iced::widget::text("Processing colors…").size(12)).into()
+        crate::ui::button(iced::widget::text("Processing colors…").size(12)).into()
     } else {
-        iced::widget::button(iced::widget::text("🎨 Process all").size(12))
+        crate::ui::button(iced::widget::text("🎨 Process all").size(12))
             .on_press(Message::ProcessAllColors)
             .into()
     };
@@ -510,9 +465,11 @@ fn bookmark_toolbar(state: &AppState) -> iced::Element<'_, Message> {
             .filter(|t| *t > 0)
             .map(|t| (state.jobs.bookmark_sync.done as f32 / t as f32).min(1.0))
             .unwrap_or(0.5);
-        let bar = iced::widget::container(iced::widget::progress_bar(0.0..=1.0, frac))
-            .width(iced::Length::Fill)
-            .height(6);
+        let bar = iced::widget::container(
+            iced::widget::progress_bar(0.0..=1.0, frac).style(crate::ui::progress),
+        )
+        .width(iced::Length::Fill)
+        .height(6);
         let text = match state.jobs.bookmark_sync.total {
             Some(total) if total > 0 => {
                 format!(
@@ -535,9 +492,11 @@ fn bookmark_toolbar(state: &AppState) -> iced::Element<'_, Message> {
     // Shared download queue progress + aggregate speed.
     if state.jobs.download_job.running {
         let frac = state.jobs.download_queue.fraction();
-        let bar = iced::widget::container(iced::widget::progress_bar(0.0..=1.0, frac))
-            .width(iced::Length::Fill)
-            .height(6);
+        let bar = iced::widget::container(
+            iced::widget::progress_bar(0.0..=1.0, frac).style(crate::ui::progress),
+        )
+        .width(iced::Length::Fill)
+        .height(6);
         let speed: f64 = state.jobs.download_speeds.values().sum();
         let mut label = format!(
             "Downloading {} · {}/{} ({:.0}%){}",
@@ -585,9 +544,11 @@ fn bookmark_toolbar(state: &AppState) -> iced::Element<'_, Message> {
         let total = state.images.color_total.max(1);
         let done = state.images.color_done.min(total);
         let frac = done as f32 / total as f32;
-        let bar = iced::widget::container(iced::widget::progress_bar(0.0..=1.0, frac))
-            .width(iced::Length::Fill)
-            .height(6);
+        let bar = iced::widget::container(
+            iced::widget::progress_bar(0.0..=1.0, frac).style(crate::ui::progress),
+        )
+        .width(iced::Length::Fill)
+        .height(6);
         children.push(
             iced::widget::column![
                 iced::widget::text(format!("Processing colors… {done}/{total}")).size(11),
@@ -617,29 +578,10 @@ fn twitter_toolbar(state: &AppState, theme: &iced::Theme) -> iced::Element<'stat
     let mut mode_buttons: Vec<iced::Element<'_, Message>> = Vec::new();
     for (mode, label) in modes {
         let active = *mode == selected;
-        let mut btn = iced::widget::button(iced::widget::text(*label).size(11))
+        let mut btn = crate::ui::button(iced::widget::text(*label).size(11))
             .on_press(Message::TwitterFeedModeChanged(*mode))
             .padding(iced::Padding::from([2, 8]));
-        btn = if active {
-            btn.style(|theme, _| iced::widget::button::Style {
-                background: Some(iced::Background::Color(crate::theme::panel(theme))),
-                text_color: crate::theme::fg(theme),
-                border: iced::Border {
-                    color: crate::theme::accent(theme),
-                    width: 1.5,
-                    radius: 4.0.into(),
-                },
-                ..Default::default()
-            })
-        } else {
-            btn.style(|theme, _| iced::widget::button::Style {
-                background: Some(iced::Background::Color(
-                    crate::theme::panel(theme).scale_alpha(0.45),
-                )),
-                text_color: crate::theme::muted(theme),
-                ..Default::default()
-            })
-        };
+        btn = btn.style(crate::ui::chip(active));
         mode_buttons.push(btn.into());
     }
 
@@ -657,7 +599,7 @@ fn twitter_toolbar(state: &AppState, theme: &iced::Theme) -> iced::Element<'stat
         iced::widget::text(status)
             .size(11)
             .color(crate::theme::muted(theme)),
-        iced::widget::button(iced::widget::text("⟳").size(13))
+        crate::ui::button(iced::widget::text("⟳").size(13))
             .on_press(Message::TwitterFeedReload)
             .padding(iced::Padding::from([2, 8])),
     ]
@@ -694,14 +636,14 @@ fn twitter_status_panel(state: &AppState, theme: &iced::Theme) -> iced::Element<
 
     let mut buttons: Vec<iced::Element<'_, Message>> =
         vec![
-            iced::widget::button(iced::widget::text("Open Settings").size(12))
+            crate::ui::button(iced::widget::text("Open Settings").size(12))
                 .on_press(Message::OpenSettings)
                 .padding(iced::Padding::from([4, 12]))
                 .into(),
         ];
     if show_retry {
         buttons.push(
-            iced::widget::button(iced::widget::text("Retry").size(12))
+            crate::ui::button(iced::widget::text("Retry").size(12))
                 .on_press(Message::ReloadTwitterCookies)
                 .padding(iced::Padding::from([4, 12]))
                 .into(),
@@ -730,29 +672,10 @@ fn bilibili_toolbar(state: &AppState, theme: &iced::Theme) -> iced::Element<'sta
     let mut mode_buttons: Vec<iced::Element<'static, Message>> = Vec::new();
     for (mode, label) in modes {
         let active = *mode == selected;
-        let mut btn = iced::widget::button(iced::widget::text(*label).size(11))
+        let mut btn = crate::ui::button(iced::widget::text(*label).size(11))
             .on_press(Message::BilibiliFeedModeChanged(*mode))
             .padding(iced::Padding::from([2, 8]));
-        btn = if active {
-            btn.style(|theme, _| iced::widget::button::Style {
-                background: Some(iced::Background::Color(crate::theme::panel(theme))),
-                text_color: crate::theme::fg(theme),
-                border: iced::Border {
-                    color: crate::theme::accent(theme),
-                    width: 1.5,
-                    radius: 4.0.into(),
-                },
-                ..Default::default()
-            })
-        } else {
-            btn.style(|theme, _| iced::widget::button::Style {
-                background: Some(iced::Background::Color(
-                    crate::theme::panel(theme).scale_alpha(0.45),
-                )),
-                text_color: crate::theme::muted(theme),
-                ..Default::default()
-            })
-        };
+        btn = btn.style(crate::ui::chip(active));
         mode_buttons.push(btn.into());
     }
 
@@ -770,7 +693,7 @@ fn bilibili_toolbar(state: &AppState, theme: &iced::Theme) -> iced::Element<'sta
         iced::widget::text(status)
             .size(11)
             .color(crate::theme::muted(theme)),
-        iced::widget::button(iced::widget::text("⟳").size(13))
+        crate::ui::button(iced::widget::text("⟳").size(13))
             .on_press(Message::BilibiliFeedReload)
             .padding(iced::Padding::from([2, 8])),
     ]
@@ -788,7 +711,7 @@ fn bilibili_status_panel(state: &AppState, theme: &iced::Theme) -> iced::Element
 
     let mut buttons: Vec<iced::Element<'static, Message>> =
         vec![
-            iced::widget::button(iced::widget::text("Open Settings").size(12))
+            crate::ui::button(iced::widget::text("Open Settings").size(12))
                 .on_press(Message::OpenSettings)
                 .padding(iced::Padding::from([4, 12]))
                 .into(),
@@ -827,7 +750,7 @@ fn bilibili_status_panel(state: &AppState, theme: &iced::Theme) -> iced::Element
     };
     if show_retry {
         buttons.push(
-            iced::widget::button(iced::widget::text("Retry").size(12))
+            crate::ui::button(iced::widget::text("Retry").size(12))
                 .on_press(Message::ReloadBilibiliCookies)
                 .padding(iced::Padding::from([4, 12]))
                 .into(),
@@ -865,33 +788,14 @@ fn ranking_toolbar(tab: &GalleryTab) -> iced::Element<'_, Message> {
     for (mode, label) in modes {
         let active = *mode == selected;
         // Active mode gets the normal button look; inactive ones are dimmed.
-        let mut btn = iced::widget::button(iced::widget::text(*label).size(11))
+        let mut btn = crate::ui::button(iced::widget::text(*label).size(11))
             .on_press(Message::RankingModeChanged(*mode))
             .padding(iced::Padding::from([2, 8]));
-        btn = if active {
-            btn.style(|theme, _| iced::widget::button::Style {
-                background: Some(iced::Background::Color(crate::theme::panel(theme))),
-                text_color: crate::theme::fg(theme),
-                border: iced::Border {
-                    color: crate::theme::accent(theme),
-                    width: 1.5,
-                    radius: 4.0.into(),
-                },
-                ..Default::default()
-            })
-        } else {
-            btn.style(|theme, _| iced::widget::button::Style {
-                background: Some(iced::Background::Color(
-                    crate::theme::panel(theme).scale_alpha(0.45),
-                )),
-                text_color: crate::theme::muted(theme),
-                ..Default::default()
-            })
-        };
+        btn = btn.style(crate::ui::chip(active));
         mode_buttons.push(btn.into());
     }
 
-    let date_input = iced::widget::text_input("YYYY-MM-DD (optional)", &tab.ranking_date)
+    let date_input = crate::ui::text_input("YYYY-MM-DD (optional)", &tab.ranking_date)
         .on_input(Message::RankingDateChanged)
         .size(12)
         .width(iced::Length::Fixed(170.0));
@@ -988,25 +892,28 @@ fn theme_button(pref: ThemePreference) -> iced::Element<'static, Message> {
         ThemePreference::Light => ThemePreference::Dark,
         ThemePreference::Dark => ThemePreference::System,
     };
-    iced::widget::button(iced::widget::text(label).size(14))
+    crate::ui::button(iced::widget::text(label).size(14))
         .on_press(Message::ThemePreferenceChanged(next))
-        .padding(iced::Padding::from([2, 8]))
+        .padding(iced::Padding::from([3, 9]))
+        .style(crate::ui::ghost)
         .into()
 }
 
 /// An icon-only button that opens the settings screen.
 fn settings_button() -> iced::Element<'static, Message> {
-    iced::widget::button(iced::widget::text("⚙").size(14))
+    crate::ui::button(iced::widget::text("⚙").size(14))
         .on_press(Message::OpenSettings)
-        .padding(iced::Padding::from([2, 8]))
+        .padding(iced::Padding::from([3, 9]))
+        .style(crate::ui::ghost)
         .into()
 }
 
 /// An icon-only button that opens the help screen (usage, hotkeys, author,
 /// license).
 fn help_button() -> iced::Element<'static, Message> {
-    iced::widget::button(iced::widget::text("?").size(14))
+    crate::ui::button(iced::widget::text("?").size(14))
         .on_press(Message::ToggleHelp)
-        .padding(iced::Padding::from([2, 10]))
+        .padding(iced::Padding::from([3, 11]))
+        .style(crate::ui::ghost)
         .into()
 }

@@ -9,7 +9,7 @@ use pixivj_rs::error::PixivError;
 use pixivj_rs::model::*;
 use std::sync::Arc;
 
-fn full_image_url(illust: &Illustration, page: usize) -> Option<String> {
+pub(super) fn full_image_url(illust: &Illustration, page: usize) -> Option<String> {
     if let Some(meta_page) = illust.meta_pages.get(page) {
         if let Some(ref url) = meta_page.image_urls.original {
             return Some(url.clone());
@@ -427,6 +427,11 @@ fn open_viewer(state: &mut AppState, id: u64) -> iced::Task<Message> {
     state.viewer.progress = None;
     state.viewer.loading = true;
     state.viewer.author_pfp = None;
+    state.viewer.transformed = None;
+    state.viewer.transform_pending = None;
+    state.viewer.transform_failed = None;
+    state.viewer.split_probe = None;
+    state.viewer.split_hint = None;
 
     // Tweets and dynamics are resolved by their own source modules, which seed
     // from live state (or the disk cache / a by-id fetch) and load comments.

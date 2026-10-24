@@ -1,5 +1,4 @@
 use crate::app::message::Message;
-use crate::theme;
 use crate::widgets::tag_input::FocusTrackTextInput;
 
 /// Tag filter bar: an input with a dropdown of the current gallery's tags
@@ -15,7 +14,7 @@ pub fn tag_filter<'a>(
     dropdown_open: bool,
 ) -> iced::Element<'a, Message> {
     let input_field: iced::Element<'a, Message> = FocusTrackTextInput::new(
-        iced::widget::text_input("Add tag...", input)
+        crate::ui::text_input("Add tag...", input)
             .on_input(Message::TagInputChanged)
             .on_submit(Message::TagAdded(input.to_string()))
             .width(iced::Length::Fixed(220.0))
@@ -36,9 +35,10 @@ pub fn tag_filter<'a>(
             }
             if needle.is_empty() || tag.to_lowercase().contains(&needle) {
                 options.push(
-                    iced::widget::button(iced::widget::text(tag).size(11))
+                    crate::ui::button(iced::widget::text(tag).size(11))
                         .on_press(Message::TagAdded(tag.clone()))
-                        .padding(iced::Padding::from([2, 8]))
+                        .padding(iced::Padding::from([3, 10]))
+                        .style(crate::ui::pill(None))
                         .into(),
                 );
             }
@@ -53,15 +53,8 @@ pub fn tag_filter<'a>(
         Some(
             iced::widget::container(crate::widgets::wrap::wrap(options).spacing(4.0))
                 .width(iced::Length::Fill)
-                .padding(iced::Padding::from([4, 4]))
-                .style(|theme| iced::widget::container::Style {
-                    background: Some(iced::Background::Color(theme::panel(theme))),
-                    border: iced::Border {
-                        radius: 4.0.into(),
-                        ..Default::default()
-                    },
-                    ..Default::default()
-                })
+                .padding(iced::Padding::from([6, 6]))
+                .style(crate::ui::card)
                 .into(),
         )
     };
@@ -70,17 +63,23 @@ pub fn tag_filter<'a>(
     let tag_labels: Vec<iced::Element<'a, Message>> = tags
         .iter()
         .map(|tag| {
-            let remove_btn = iced::widget::button(iced::widget::text("✕").size(10))
+            let remove_btn = crate::ui::button(iced::widget::text("✕").size(10))
                 .on_press(Message::TagRemoved(tag.clone()))
-                .padding(iced::Padding::from([1, 3]))
-                .style(|_, _| iced::widget::button::Style {
-                    text_color: crate::theme::DANGER,
-                    ..Default::default()
-                });
-            iced::widget::row![iced::widget::text(tag.clone()).size(10), remove_btn]
-                .spacing(2)
-                .padding(iced::Padding::from([2, 4]))
-                .into()
+                .padding(iced::Padding::from([0, 4]))
+                .style(crate::ui::ghost);
+            iced::widget::container(
+                iced::widget::row![iced::widget::text(tag.clone()).size(11), remove_btn]
+                    .spacing(2)
+                    .align_y(iced::Alignment::Center),
+            )
+            .padding(iced::Padding {
+                top: 2.0,
+                right: 4.0,
+                bottom: 2.0,
+                left: 10.0,
+            })
+            .style(crate::ui::tag)
+            .into()
         })
         .collect();
 

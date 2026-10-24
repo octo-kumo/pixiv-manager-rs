@@ -87,7 +87,14 @@ impl GalleryTab {
     /// the sRGB/Hue color comparators.
     pub fn reapply(&mut self, palettes: &std::collections::HashMap<u64, Vec<[u8; 3]>>) {
         self.filtered = self.filters.apply(&self.illustrations, &self.downloaded);
-        self.sort.sort(&mut self.filtered, palettes);
+        if self.filters.mode == crate::app::filter::FilterMode::Query {
+            // Query mode sorts by its own `order:` tokens.
+            crate::app::query::Query::parse(&self.filters.query_text)
+                .sort_state()
+                .sort(&mut self.filtered, palettes);
+        } else {
+            self.sort.sort(&mut self.filtered, palettes);
+        }
     }
 }
 
@@ -447,6 +454,8 @@ pub enum SettingsKey {
     FpsLimit,
     /// High-resolution thumbnails (uses the 1200px source).
     ThumbnailHighRes,
+    /// The Twitter viewer's combine/rotate toolbar.
+    TwitterViewerTools,
     /// Path to the Twitter cookies file.
     TwitterCookies,
     /// Path to the Bilibili cookies file.
@@ -515,6 +524,9 @@ pub struct Settings {
     /// hi-DPI displays at the cost of more memory/bandwidth.
     #[serde(default)]
     pub high_res_thumbnails: bool,
+    /// Show the combine/rotate toolbar in the viewer for Twitter items.
+    #[serde(default = "default_true")]
+    pub twitter_viewer_tools: bool,
     /// Path to a browser-exported Netscape `cookies.txt` for Twitter/X.
     /// `None` means Twitter is disabled (unless a default path exists).
     #[serde(default)]
@@ -574,6 +586,7 @@ impl Settings {
             SettingsKey::MemoryPreset => self.memory_preset = MemoryPreset::default(),
             SettingsKey::FpsLimit => self.fps_limit = 0,
             SettingsKey::ThumbnailHighRes => self.high_res_thumbnails = false,
+            SettingsKey::TwitterViewerTools => self.twitter_viewer_tools = default_true(),
             SettingsKey::TwitterCookies => self.twitter_cookie_path = None,
             SettingsKey::BilibiliCookies => self.bilibili_cookie_path = None,
             SettingsKey::BilibiliUsers => self.bilibili_user_ids.clear(),
@@ -611,6 +624,9 @@ impl Settings {
             SettingsKey::MemoryPreset => self.memory_preset == probe.memory_preset,
             SettingsKey::FpsLimit => self.fps_limit == probe.fps_limit,
             SettingsKey::ThumbnailHighRes => self.high_res_thumbnails == probe.high_res_thumbnails,
+            SettingsKey::TwitterViewerTools => {
+                self.twitter_viewer_tools == probe.twitter_viewer_tools
+            }
             SettingsKey::TwitterCookies => self.twitter_cookie_path == probe.twitter_cookie_path,
             SettingsKey::BilibiliCookies => self.bilibili_cookie_path == probe.bilibili_cookie_path,
             SettingsKey::BilibiliUsers => self.bilibili_user_ids == probe.bilibili_user_ids,
@@ -640,6 +656,7 @@ impl Default for Settings {
             memory_preset: MemoryPreset::default(),
             fps_limit: 0,
             high_res_thumbnails: false,
+            twitter_viewer_tools: default_true(),
             twitter_cookie_path: None,
             bilibili_cookie_path: None,
             bilibili_user_ids: Vec::new(),
@@ -752,6 +769,20 @@ pub struct ViewerState {
     /// Whether an older-comments page is in flight (dedups scroll-triggered
     /// `CommentsLoadMore` requests for the same cursor).
     pub comments_loading: bool,
+    /// The rendered (combined and/or rotated) image for `transformed.0`.
+    /// Shown instead of `handle` while its key matches the wanted transform.
+    pub transformed: Option<(
+        crate::viewer_tools::TransformKey,
+        iced::widget::image::Handle,
+    )>,
+    /// A transform render in flight.
+    pub transform_pending: Option<crate::viewer_tools::TransformKey>,
+    /// A transform render that failed (not retried automatically).
+    pub transform_failed: Option<crate::viewer_tools::TransformKey>,
+    /// The illust whose pages were (or are being) probed for a split image.
+    pub split_probe: Option<u64>,
+    /// Axis the detector found for the open illust (drives the hint).
+    pub split_hint: Option<crate::viewer_tools::MergeAxis>,
 }
 impl ViewerState {
     /// Reset the viewer to its closed state. Every close path (Esc, close
@@ -964,6 +995,9 @@ pub struct AppState {
     pub viewer: ViewerState,
     /// Artist page state.
     pub artist: ArtistState,
+    /// Saved display transforms (combine/rotate) per Twitter item, keyed by
+    /// namespaced id; persisted to `viewer_transforms.json`.
+    pub view_transforms: HashMap<u64, crate::viewer_tools::ViewTransform>,
     /// Image bytes/handles caches.
     pub images: ImageState,
     /// Downloads, library and job state.

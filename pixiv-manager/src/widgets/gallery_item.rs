@@ -177,7 +177,7 @@ pub fn gallery_item<'a>(
     // scroll-parallax reference viewport equal to the tile itself (zero
     // offset). `ClipViewport` clips the drawing but keeps the gallery's real
     // viewport for the parallax math.
-    iced::widget::button(crate::widgets::clip_viewport::ClipViewport::new(stack))
+    crate::ui::button(crate::widgets::clip_viewport::ClipViewport::new(stack))
         .on_press(Message::GalleryItemClicked(id))
         .clip(false)
         .padding(iced::Padding::ZERO)

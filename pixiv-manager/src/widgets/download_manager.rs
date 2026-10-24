@@ -46,10 +46,10 @@ pub fn download_manager(state: &AppState) -> iced::Element<'_, Message> {
                 iced::widget::text("⏳ queued").size(11).into()
             };
             let priority_row = iced::widget::row![
-                iced::widget::button(iced::widget::text("↑").size(12))
+                crate::ui::button(iced::widget::text("↑").size(12))
                     .on_press_maybe((i > 0).then_some(Message::DownloadPriorityUp(*id)))
                     .padding(iced::Padding::from([1, 6])),
-                iced::widget::button(iced::widget::text("↓").size(12))
+                crate::ui::button(iced::widget::text("↓").size(12))
                     .on_press_maybe(
                         (i + 1 < queue.remaining.len())
                             .then_some(Message::DownloadPriorityDown(*id)),
@@ -73,12 +73,11 @@ pub fn download_manager(state: &AppState) -> iced::Element<'_, Message> {
                 )
                 .padding(iced::Padding::from([3, 6]))
                 .style(|theme| iced::widget::container::Style {
-                    background: Some(iced::Background::Color(iced::Color {
-                        a: 0.4,
-                        ..theme::panel(theme)
-                    })),
+                    background: Some(iced::Background::Color(
+                        theme::panel(theme).scale_alpha(0.6),
+                    )),
                     border: iced::Border {
-                        radius: 4.0.into(),
+                        radius: crate::ui::RADIUS.into(),
                         ..Default::default()
                     },
                     ..Default::default()
@@ -120,12 +119,13 @@ pub fn download_manager(state: &AppState) -> iced::Element<'_, Message> {
             iced::widget::row![
                 iced::widget::text("Download Manager").size(18),
                 iced::widget::Space::new().width(iced::Length::Fill),
-                iced::widget::button(iced::widget::text("✕").size(14))
+                crate::ui::button(iced::widget::text("✕").size(14))
                     .on_press(Message::ToggleDownloadManager)
-                    .padding(iced::Padding::from([4, 10])),
+                    .padding(iced::Padding::from([4, 10]))
+                    .style(crate::ui::ghost),
             ]
             .spacing(8),
-            iced::widget::scrollable(iced::widget::Column::with_children(rows).spacing(2))
+            crate::ui::scrollable(iced::widget::Column::with_children(rows).spacing(2))
                 .height(iced::Length::Fill),
         ]
         .spacing(10)
@@ -133,20 +133,13 @@ pub fn download_manager(state: &AppState) -> iced::Element<'_, Message> {
         .width(520)
         .height(480),
     )
-    .style(|theme| iced::widget::container::Style {
-        background: Some(iced::Background::Color(theme::panel(theme))),
-        border: iced::Border {
-            radius: 8.0.into(),
-            color: theme::border(theme),
-            width: 1.0,
-        },
-        ..Default::default()
-    });
+    .style(crate::ui::card);
 
     iced::widget::container(panel)
         .center_x(iced::Length::Fill)
         .center_y(iced::Length::Fill)
         .width(iced::Length::Fill)
         .height(iced::Length::Fill)
+        .style(crate::ui::scrim)
         .into()
 }

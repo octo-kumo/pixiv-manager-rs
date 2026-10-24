@@ -4,8 +4,9 @@ use super::{
     handle_api_error, spawn_thumbnails_for_window, update, viewport_estimate, AUTO_LOAD_MAX_PAGES,
     AUTO_LOAD_MIN_TILES,
 };
-use crate::app::filter::{OptionFilterKey, Tristate};
+use crate::app::filter::{FilterMode, OptionFilterKey, Tristate};
 use crate::app::message::Message;
+use crate::app::query::Query;
 use crate::app::sort::SortDirection;
 use crate::app::state::AppState;
 use crate::app::state::Tab;
@@ -742,7 +743,14 @@ pub(super) fn handle(state: &mut AppState, message: Message) -> iced::Task<Messa
             // The search box is per-tab: its text lives in each tab's own
             // filter state and must not leak into (or be cleared from) the
             // other tabs.
-            state.active_tab_data_mut().filters.search_text = text;
+            let filters = &mut state.active_tab_data_mut().filters;
+            if filters.mode == FilterMode::Query {
+                // The text query has its own box content; the Pixiv
+                // autocomplete only serves the classic search.
+                filters.query_text = text;
+                return on_filters_changed(state);
+            }
+            filters.search_text = text;
             // On the Search tab, fetch autocomplete suggestions for the query.
             if state.active_tab == Tab::Search
                 && !state.tabs.search.filters.search_text.trim().is_empty()
@@ -759,6 +767,36 @@ pub(super) fn handle(state: &mut AppState, message: Message) -> iced::Task<Messa
                 return filter_task;
             }
             on_filters_changed(state)
+        }
+
+        Message::FilterModeChanged(mode) => {
+            // One mode for the whole app; each tab keeps its own text.
+            let palettes = &state.images.palettes;
+            for tab in state.tabs.iter_mut() {
+                tab.filters.mode = mode;
+                tab.reapply(palettes);
+            }
+            state.autocomplete_tags.clear();
+            state.autocomplete_selected = None;
+            on_filters_changed(state)
+        }
+
+        Message::QueryTokenRemoved(index) => {
+            let filters = &mut state.active_tab_data_mut().filters;
+            filters.query_text = Query::parse(&filters.query_text).without_token(index);
+            on_filters_changed(state)
+        }
+
+        Message::QuerySuggestionClicked(suggestion) => {
+            let filters = &mut state.active_tab_data_mut().filters;
+            filters.query_text =
+                crate::app::query::apply_suggestion(&filters.query_text, &suggestion);
+            let filter_task = on_filters_changed(state);
+            iced::Task::batch([
+                filter_task,
+                iced::widget::operation::focus(control_pane::SEARCH_INPUT_ID),
+                iced::widget::operation::move_cursor_to_end(control_pane::SEARCH_INPUT_ID),
+            ])
         }
 
         Message::SearchTargetChanged(key, on) => {
@@ -780,7 +818,14 @@ pub(super) fn handle(state: &mut AppState, message: Message) -> iced::Task<Messa
         Message::SearchSubmitted => {
             // Enter in the search bar runs a Pixiv search on the Search tab.
             if state.active_tab == Tab::Search {
-                let query = state.tabs.search.filters.search_text.clone();
+                let filters = &state.tabs.search.filters;
+                // Query mode searches Pixiv for the query's plain tags and
+                // filters the results locally with the rest.
+                let query = if filters.mode == FilterMode::Query {
+                    Query::parse(&filters.query_text).server_terms()
+                } else {
+                    filters.search_text.clone()
+                };
                 if !query.trim().is_empty() {
                     state.tabs.search.query = Some(query);
                     state.tabs.search.illustrations.clear();
@@ -800,7 +845,11 @@ pub(super) fn handle(state: &mut AppState, message: Message) -> iced::Task<Messa
             state.active_tab = Tab::Search;
 
             state.tabs.search.query = Some(tag.clone());
-            state.tabs.search.filters.search_text = tag;
+            if state.tabs.search.filters.mode == FilterMode::Query {
+                state.tabs.search.filters.query_text = tag.trim().replace(' ', "_");
+            } else {
+                state.tabs.search.filters.search_text = tag;
+            }
             state.tabs.search.illustrations.clear();
             state.tabs.search.filtered.clear();
             state.tabs.search.next_url = None;
@@ -1066,7 +1115,10 @@ pub(super) fn handle(state: &mut AppState, message: Message) -> iced::Task<Messa
             // a clean list back).
             let tab = state.active_tab;
             let t = state.tab_mut(tab);
+            // The mode is a view preference, not a filter: keep it.
+            let mode = t.filters.mode;
             t.filters = Default::default();
+            t.filters.mode = mode;
             t.sort = Default::default();
             // Re-seed the Bookmarked exclusion when the "hide bookmarked"
             // option is on (a plain reset would otherwise show them again).
@@ -1218,7 +1270,31 @@ pub(super) fn handle(state: &mut AppState, message: Message) -> iced::Task<Messa
         }
 
         Message::ColorSortChanged(color) => {
-            state.active_tab_data_mut().sort.color = Some(color);
+            let sort = &mut state.active_tab_data_mut().sort;
+            sort.color = Some(color);
+            sort.custom_color_text = None;
+            state.reapply_active_tab();
+            iced::Task::none()
+        }
+
+        Message::CustomColorSelected => {
+            let sort = &mut state.active_tab_data_mut().sort;
+            if sort.custom_color_text.is_none() {
+                let [r, g, b] = sort.color.unwrap_or([128, 128, 128]);
+                sort.custom_color_text = Some(format!("#{r:02x}{g:02x}{b:02x}"));
+                sort.color = Some([r, g, b]);
+            }
+            state.reapply_active_tab();
+            iced::Task::none()
+        }
+
+        Message::CustomColorTextChanged(text) => {
+            let sort = &mut state.active_tab_data_mut().sort;
+            // An unparsable text keeps the last valid color.
+            if let Some(rgb) = crate::app::sort::parse_color(&text) {
+                sort.color = Some(rgb);
+            }
+            sort.custom_color_text = Some(text);
             state.reapply_active_tab();
             iced::Task::none()
         }
