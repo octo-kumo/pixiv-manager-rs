@@ -56,11 +56,9 @@ struct Probe {
 
 impl Probe {
     fn new() -> Self {
-        std::env::set_var(
-            "PIXIV_MANAGER_CONFIG_DIR",
-            "/tmp/opencode/layer_probe_config",
-        );
-        std::fs::create_dir_all("/tmp/opencode/layer_probe_config").unwrap();
+        let config_dir = std::env::temp_dir().join("pixiv_manager_layer_probe_config");
+        std::fs::create_dir_all(&config_dir).unwrap();
+        std::env::set_var("PIXIV_MANAGER_CONFIG_DIR", &config_dir);
         let mut state = AppState {
             phase: AppPhase::Main,
             window_size: (1920.0, 1080.0),
@@ -157,6 +155,7 @@ fn probe_scrolled_gallery() {
         ui.simulate([redraw()]);
     }
 
+    std::fs::create_dir_all("target/layer_probe").unwrap();
     for entry in std::fs::read_dir("target/layer_probe").unwrap().flatten() {
         let _ = std::fs::remove_file(entry.path());
     }
