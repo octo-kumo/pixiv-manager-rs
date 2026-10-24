@@ -169,6 +169,16 @@ fn probe_scrolled_gallery() {
         .map(|e| e.path())
         .next()
         .expect("snapshot png");
+    // The probe targets the wgpu blur/clip pipeline. Without a GPU (CI) iced
+    // falls back to tiny-skia, which draws images unclipped, so the pixel
+    // check is meaningless there. `matches_image` suffixes the backend name.
+    if !png
+        .file_name()
+        .is_some_and(|n| n.to_string_lossy().contains("wgpu"))
+    {
+        eprintln!("skipping: snapshot not rendered by wgpu ({png:?})");
+        return;
+    }
     let img = image::open(png).unwrap().to_rgba8();
     let (iw, ih) = img.dimensions();
     println!("snapshot {iw}x{ih}");
