@@ -4,7 +4,11 @@
 > https://github.com/octo-kumo/pixiv-manager
 > this ver is on all measures, an improvement over the original
 
+![alt text](imgs/image.png)
 
+![alt text](imgs/image2.png)
+
+![alt text](imgs/image3.png)
 
 A desktop client for browsing, filtering and downloading Pixiv artwork — and,
 since recently, your Twitter/X **photo feed and likes** and your Bilibili
