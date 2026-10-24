@@ -1,5 +1,11 @@
 # pixiv-manager
 
+> Yun@2026OCT24: hello, this is a AI rewrite of the original pixiv manager i made quite a long time ago
+> https://github.com/octo-kumo/pixiv-manager
+> this ver is on all measures, an improvement over the original
+
+
+
 A desktop client for browsing, filtering and downloading Pixiv artwork — and,
 since recently, your Twitter/X **photo feed and likes** and your Bilibili
 **dynamic feed** side by side with Pixiv bookmarks.
