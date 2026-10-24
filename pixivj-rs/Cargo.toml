@@ -1,7 +1,7 @@
 [package]
 name = "pixivj-rs"
-version = "0.1.0"
-edition = "2021"
+version.workspace = true
+edition.workspace = true
 
 [features]
 # Lightweight global profiling tracer (HTTP/IO samples). Off by default:

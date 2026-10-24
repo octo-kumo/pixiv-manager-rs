@@ -1,0 +1,48 @@
+name: Release
+# Runs after CI succeeds on master. The version is MAJOR.MINOR from
+# [workspace.package] in Cargo.toml; the patch is auto-incremented from the
+# latest matching tag (reset to 0 when MAJOR.MINOR is bumped by hand).
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [master]
+
+permissions:
+  contents: write
+
+concurrency: release
+
+jobs:
+  release:
+    if: github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Compute version
+        id: ver
+        run: |
+          base=$(grep -m1 '^version' Cargo.toml | sed -E 's/.*"([0-9]+\.[0-9]+)\.[0-9]+".*/\1/')
+          last=$(git tag -l "v${base}.*" | sed -E 's/.*\.([0-9]+)$/\1/' | sort -n | tail -1)
+          next=$(( ${last:--1} + 1 ))
+          echo "version=${base}.${next}" >> "$GITHUB_OUTPUT"
+      - name: Stamp version
+        run: |
+          sed -i -E '0,/^version = .*/s//version = "${{ steps.ver.outputs.version }}"/' Cargo.toml
+      - run: cargo build --release --workspace
+      - name: Package
+        run: |
+          name=pixiv-manager-${{ steps.ver.outputs.version }}-x86_64-linux
+          mkdir "$name"
+          cp target/release/pixiv-manager target/release/pixiv-manager-cli README.md "$name"/
+          tar czf "$name.tar.gz" "$name"
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          v=v${{ steps.ver.outputs.version }}
+          gh release create "$v" ./*.tar.gz --target "${{ github.event.workflow_run.head_sha }}" --title "$v" --generate-notes

@@ -1,7 +1,7 @@
 [package]
 name = "pixiv-manager"
-version = "0.1.0"
-edition = "2021"
+version.workspace = true
+edition.workspace = true
 
 [lib]
 name = "pixiv_manager"
@@ -41,12 +41,12 @@ serde_json = { workspace = true }
 clap = { workspace = true }
 image = { workspace = true }
 chrono = { workspace = true }
-lru = "0.18"
+lru = "0.19"
 sha2 = "0.11"
 base64 = "0.23"
 md-5 = "0.11"
 rand = "0.10"
-dirs = "6"
+dirs = "7"
 toml = "1"
 log = "0.4"
 env_logger = "0.11"
