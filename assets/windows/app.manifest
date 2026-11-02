@@ -1,14 +1,8 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<!--
-  Application manifest for the Windows binaries.
-
-  * requestedExecutionLevel=asInvoker — the app never asks for administrator
-    rights: it writes only to the user's own config/data/cache directories.
-  * PerMonitorV2 DPI awareness — winit/iced handle WM_DPICHANGED; without the
-    manifest Windows would bitmap-stretch the window on scaled displays.
-  * longPathAware — lets >260 character gallery paths work on Windows 10+.
-  * supportedOS — declares Win10/11 (the targets we build and test for).
--->
+<!-- asInvoker: the app never needs administrator rights.
+     PerMonitorV2: winit/iced handle WM_DPICHANGED; without it Windows
+     bitmap-stretches the window on scaled displays.
+     longPathAware: gallery paths beyond MAX_PATH. -->
 <assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
   <assemblyIdentity type="win32" name="PixivManager" version="1.0.0.0" processorArchitecture="*"/>
   <description>Pixiv Manager</description>
@@ -21,12 +15,9 @@
   </trustInfo>
   <compatibility xmlns="urn:schemas-microsoft-com:compatibility.v1">
     <application>
-      <!-- Windows 10 and Windows 11 -->
-      <supportedOS Id="{8e0f7a12-bfb3-4fe8-b9a5-48fd50a15a9a}"/>
-      <!-- Windows 8.1 -->
-      <supportedOS Id="{1f676c76-80e1-4239-95bb-83d0f6d0da78}"/>
-      <!-- Windows 8 -->
-      <supportedOS Id="{4a2f28e3-53b9-4441-ba9c-d69d4a4a6e38}"/>
+            <supportedOS Id="{8e0f7a12-bfb3-4fe8-b9a5-48fd50a15a9a}"/>
+            <supportedOS Id="{1f676c76-80e1-4239-95bb-83d0f6d0da78}"/>
+            <supportedOS Id="{4a2f28e3-53b9-4441-ba9c-d69d4a4a6e38}"/>
     </application>
   </compatibility>
   <application xmlns="urn:schemas-microsoft-com:asm.v3">

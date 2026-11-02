@@ -136,7 +136,8 @@ fn clip_layer_scissors_translated_children() {
     let snapshot = ui.snapshot(&iced::Theme::Dark).expect("snapshot");
 
     // Same as layer_probe: keep probe artifacts out of the source tree.
-    let probe_dir = std::env::temp_dir().join("pixiv-manager-layer-probe");
+    let probe_dir =
+        std::env::temp_dir().join(format!("pixiv-manager-probe-{}", std::process::id()));
     std::fs::create_dir_all(&probe_dir).unwrap();
     for entry in std::fs::read_dir(&probe_dir).unwrap().flatten() {
         let _ = std::fs::remove_file(entry.path());

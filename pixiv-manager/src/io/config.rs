@@ -17,11 +17,8 @@ pub fn load_config() -> Option<Settings> {
     toml::from_str(&content).ok()
 }
 
-/// Save config to disk.
-///
-/// The config holds the OAuth refresh token (≈ account password), so it is
-/// written through the owner-only atomic path and any legacy (world-readable)
-/// config is re-permissioned on every save and at boot.
+/// Save config to disk. The file holds the OAuth refresh token, so it is
+/// written owner-only on Unix.
 pub fn save_config(settings: &Settings) {
     if let Some(path) = config_path() {
         if let Ok(content) = toml::to_string_pretty(settings) {

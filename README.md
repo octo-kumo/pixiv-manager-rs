@@ -22,52 +22,14 @@ media model.
 
 ## Supported platforms
 
-| Platform | Status | Artifacts |
-|---|---|---|
-| Linux x86-64 | **Supported** — built, tested and used for development | `pixiv-manager-VERSION-x86_64-linux.tar.gz`, `./install.sh` |
-| Windows 10/11 x86-64 | **Supported** — built and tested natively (GUI + CLI, persistence, downloads, DPI, cookies) | `pixiv-manager-VERSION-x86_64-windows.zip` (portable), `PixivManager-VERSION-x86_64.msi` |
-| macOS 11+ (Apple Silicon + Intel) | **Experimental** — compiles in CI and macOS-specific code paths (⌘ shortcuts, `.app` bundle, Caches/Application Support locations) are implemented, but the GUI has not yet been runtime-tested on a Mac | `Pixiv-Manager-VERSION-universal.dmg`, `pixiv-manager-cli-VERSION-macos.tar.gz` |
+Linux x86-64 and Windows 10/11 x86-64 are supported and tested. macOS builds
+and passes the test suite in CI but has not had an interactive GUI test, so it
+is experimental.
 
-The application is one codebase on every platform: the same GUI, state machine,
-downloaders, provider clients and on-disk formats. OS differences are confined
-to `pixiv-manager/src/platform/` (memory/debug figures, the primary shortcut
-modifier, atomic file replacement) and `pixiv-manager/src/io/paths.rs`
-(directory layout). No reducers, widgets or provider code contain
-`cfg(target_os = …)` logic.
+## Build & run
 
-## Installation
-
-### Linux
-
-```bash
-./install.sh          # builds, installs to ~/.local/bin + KDE desktop entry
-```
-
-or unpack the release tarball anywhere and run the binaries from it.
-
-### Windows — portable ZIP
-
-Download `pixiv-manager-VERSION-x86_64-windows.zip`, extract it, and run
-`pixiv-manager.exe`. Nothing is installed and nothing is written outside your
-user profile. `pixiv-manager-cli.exe` is the command-line interface.
-
-### Windows — MSI
-
-`PixivManager-VERSION-x86_64.msi` installs per-user (no administrator prompt) to
-`%LOCALAPPDATA%\Programs\Pixiv Manager`, adds a Start-menu entry and an
-uninstall entry. It does not add the CLI to `PATH`, create services or startup
-entries, open firewall ports, or touch any browser data.
-
-### macOS
-
-Download `Pixiv-Manager-VERSION-universal.dmg`, open it and drag the app to
-`/Applications`. The CLI is a separate tarball. See
-[CROSS_PLATFORM_REPORT.md](CROSS_PLATFORM_REPORT.md) for the current signing and
-notarization status before relying on the macOS build.
-
-### Build from source
-
-Requires a stable Rust toolchain (pinned by `rust-toolchain`).
+Requires stable Rust (pinned by `rust-toolchain`). On Windows the rustls crypto
+provider needs CMake and NASM on `PATH`.
 
 ```bash
 cargo build --release --locked
@@ -75,34 +37,30 @@ cargo build --release --locked
 ./target/release/pixiv-manager-cli    # CLI (Pixiv)
 ```
 
-On Windows the rustls crypto provider (`aws-lc-sys`) needs CMake and NASM on
-`PATH`; both ship with the Visual Studio C++ build tools / `windows-latest`
-images. The release binaries are built with the MSVC target
-(`x86_64-pc-windows-msvc`).
+`./install.sh` is the Linux installer (`~/.local/bin` plus a KDE desktop
+entry).
 
-Tests / lints (exactly what `.github/workflows/ci.yml` runs):
+Tests / lints (what CI runs, on Linux, Windows and macOS):
 
 ```bash
-cargo fmt --check                          # Linux only (formatting is OS-neutral)
-cargo clippy --workspace -- -D warnings    # Linux only
-cargo test --workspace --locked            # Linux, Windows, macOS
-cargo build --release --workspace --locked # Linux, Windows, macOS
+cargo fmt --check
+cargo clippy --workspace -- -D warnings
+cargo test --workspace --locked
 ```
 
-`Cargo.lock` is committed: every platform and every released artifact resolves
-the same dependency graph.
+`Cargo.lock` is committed, so every platform and release resolves the same
+dependency graph.
 
 ### Where files live
 
 | | Linux | Windows | macOS |
 |---|---|---|---|
-| `config.toml` (holds the refresh token) | `~/.config/pixiv-manager/` | `%APPDATA%\pixiv-manager\` | `~/Library/Application Support/pixiv-manager/` |
-| Bookmark library, download queue, colours, metadata, viewer transforms | `~/.local/share/pixiv-manager/library/` | `%LOCALAPPDATA%\pixiv-manager\library\` | `~/Library/Application Support/pixiv-manager/library/` |
+| `config.toml` (refresh token, cookie hints) | `~/.config/pixiv-manager/` | `%APPDATA%\pixiv-manager\` | `~/Library/Application Support/pixiv-manager/` |
+| Library, queue, colours, metadata, viewer transforms | `~/.local/share/pixiv-manager/library/` | `%LOCALAPPDATA%\pixiv-manager\data\library\` | `~/Library/Application Support/pixiv-manager/data/library/` |
 | Image cache (disposable) | `~/.cache/pixiv-manager/` | `%LOCALAPPDATA%\pixiv-manager\cache\` | `~/Library/Caches/pixiv-manager/` |
 
-The exact paths for your machine are shown in the app's log at startup and used
-as the placeholder hints in **Settings**; `PIXIV_MANAGER_CONFIG_DIR` overrides
-all of them (used by tests and portable installs).
+`PIXIV_MANAGER_CONFIG_DIR` overrides all three with one directory (tests and
+portable installs).
 
 ## Twitter / X setup
 

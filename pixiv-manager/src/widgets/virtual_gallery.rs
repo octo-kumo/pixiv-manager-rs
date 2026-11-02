@@ -131,6 +131,41 @@ fn scrollbar_fade(idle: std::time::Duration) -> f32 {
     (1.0 - faded).clamp(0.0, 1.0)
 }
 
+/// The layout/clip state of the most recent [`VirtualGallery`] draw.
+///
+/// Recorded only for tests (`test-util` is enabled by the crate's dev-dependency
+/// on itself, and unit tests compile the module with `cfg(test)`), so the pixel
+/// probes can derive the gallery's real clip rectangle from the same layout the
+/// app uses instead of hard-coding one platform's pixel geometry.
+#[cfg(any(test, feature = "test-util"))]
+#[derive(Debug, Clone, Copy)]
+pub struct DrawProbe {
+    /// The gallery widget's own layout bounds (screen coordinates).
+    pub bounds: Rectangle,
+    /// The viewport iced handed to `draw` (the parent's visible region).
+    pub viewport: Rectangle,
+    /// The clip the rows are actually drawn with (`bounds ∩ viewport`);
+    /// `None` when the gallery is entirely outside the parent viewport.
+    pub clip: Option<Rectangle>,
+    /// The animated scroll offset, in content coordinates.
+    pub offset: f32,
+    /// Index of the first built row.
+    pub first_row: usize,
+    /// Number of built rows.
+    pub rows: usize,
+}
+
+#[cfg(any(test, feature = "test-util"))]
+static DRAW_PROBE: std::sync::Mutex<Option<DrawProbe>> = std::sync::Mutex::new(None);
+
+/// Returns the state recorded by the most recent gallery draw (test instrument).
+#[cfg(any(test, feature = "test-util"))]
+pub fn draw_probe() -> Option<DrawProbe> {
+    *DRAW_PROBE
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
 /// A vertically scrolling, virtualized grid of pre-built rows.
 pub struct VirtualGallery<'a> {
     /// The visible rows (pre-built by the caller).
@@ -222,6 +257,20 @@ impl<'a> VirtualGallery<'a> {
     /// The rail's x coordinate (left edge) for `bounds`.
     fn rail_x(bounds: &Rectangle) -> f32 {
         bounds.x + bounds.width - SCROLLBAR_WIDTH - SCROLLBAR_MARGIN
+    }
+
+    /// The region the gallery is allowed to paint into: its own layout bounds
+    /// intersected with the viewport iced handed to `draw` (the parent's
+    /// visible clip). `None` when the gallery is entirely outside it.
+    ///
+    /// Layers in iced_wgpu are scissored to their OWN bounds only; a nested
+    /// layer does not inherit its parent's scissor. So a widget that creates a
+    /// layer must intersect with the incoming viewport itself (see also
+    /// [`crate::widgets::clip_viewport::ClipViewport`]), otherwise content
+    /// translated/scrolled outside the widget's visible region paints over the
+    /// parent's neighbours.
+    fn clip_rect(bounds: Rectangle, viewport: &Rectangle) -> Option<Rectangle> {
+        bounds.intersection(viewport)
     }
 }
 
@@ -472,19 +521,51 @@ impl Widget<Message, iced::Theme, iced::Renderer> for VirtualGallery<'_> {
         }
         if std::env::var_os("PIXIV_MANAGER_PROBE").is_some() {
             eprintln!(
-                "[vg] draw bounds={bounds:?} offset={} first_row={}",
+                "[vg] draw bounds={bounds:?} viewport={viewport:?} offset={} first_row={}",
                 state.offset, self.first_row,
             );
         }
 
-        // Clip to the viewport and translate children by the scroll offset.
-        renderer.with_layer(bounds, |renderer| {
+        // iced_wgpu scissors a layer to its own bounds only: it does NOT
+        // intersect a nested layer's clip with its parent's. The gallery's
+        // visible region is therefore its own bounds INTERSECTED with the
+        // viewport iced handed down (the parent's clip), exactly like
+        // `ClipViewport::draw` does for a tile. Without this, a gallery that
+        // is partially outside its parent's viewport would paint rows,
+        // overlays and the scrollbar over whatever is outside the clip.
+        let clip = Self::clip_rect(bounds, viewport);
+
+        #[cfg(any(test, feature = "test-util"))]
+        {
+            let probe = DrawProbe {
+                bounds,
+                viewport: *viewport,
+                clip,
+                offset: state.offset,
+                first_row: self.first_row,
+                rows: self.rows.len(),
+            };
+            *DRAW_PROBE
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(probe);
+        }
+
+        // Fully clipped away: nothing (not even the scrollbar) may be drawn.
+        let Some(clip) = clip else {
+            return;
+        };
+
+        // Translate children by the scroll offset inside the clip layer. The
+        // children see the CLIPPED gallery region as their viewport (in
+        // content coordinates) so their own layers/parallax clip to the same
+        // region — a child's viewport is not scissored by this layer either.
+        renderer.with_layer(clip, |renderer| {
             renderer.with_translation(Vector::new(0.0, -state.offset), |renderer| {
                 let content_viewport = Rectangle {
-                    x: bounds.x,
-                    y: bounds.y + state.offset,
-                    width: bounds.width,
-                    height: bounds.height,
+                    x: clip.x,
+                    y: clip.y + state.offset,
+                    width: clip.width,
+                    height: clip.height,
                 };
                 for (i, row) in self.rows.iter().enumerate() {
                     let child = &tree.children[i];
@@ -527,7 +608,7 @@ impl Widget<Message, iced::Theme, iced::Renderer> for VirtualGallery<'_> {
                     crate::theme::fg(theme).scale_alpha(THUMB_OPACITY * alpha)
                 };
                 let rail_color = crate::theme::fg(theme).scale_alpha(RAIL_OPACITY * alpha);
-                renderer.with_layer(bounds, |renderer| {
+                renderer.with_layer(clip, |renderer| {
                     renderer.fill_quad(
                         renderer::Quad {
                             bounds: Rectangle::new(
@@ -559,8 +640,6 @@ impl Widget<Message, iced::Theme, iced::Renderer> for VirtualGallery<'_> {
                 });
             }
         }
-        let _ = viewport;
-        let _ = cursor;
     }
 }
 
@@ -856,5 +935,40 @@ mod tests {
         // Content that fits → no scrollbar.
         let short = VirtualGallery::new(Vec::new(), 0, 2, 100.0, 1, 0.0);
         assert!(short.thumb(&state, &bounds).is_none());
+    }
+
+    #[test]
+    fn clip_rect_intersects_the_parent_viewport() {
+        let bounds = Rectangle::new(Point::new(0.0, 71.2), Size::new(1024.0, 696.8));
+
+        // The normal case: the parent viewport (the window) contains the
+        // gallery, so the gallery clips to its own bounds.
+        let window = Rectangle::new(Point::new(0.0, 0.0), Size::new(1024.0, 768.0));
+        assert_eq!(VirtualGallery::clip_rect(bounds, &window), Some(bounds));
+
+        // A clipping parent that only exposes a band of the gallery: the
+        // layer must shrink to the intersection, not the full bounds.
+        let band = Rectangle::new(Point::new(0.0, 300.0), Size::new(1024.0, 200.0));
+        assert_eq!(
+            VirtualGallery::clip_rect(bounds, &band),
+            Some(Rectangle::new(
+                Point::new(0.0, 300.0),
+                Size::new(1024.0, 200.0)
+            ))
+        );
+
+        // A clipping parent that only exposes its right half.
+        let right = Rectangle::new(Point::new(512.0, 0.0), Size::new(512.0, 768.0));
+        assert_eq!(
+            VirtualGallery::clip_rect(bounds, &right),
+            Some(Rectangle::new(
+                Point::new(512.0, 71.2),
+                Size::new(512.0, 696.8)
+            ))
+        );
+
+        // Entirely clipped away: draw nothing at all.
+        let below = Rectangle::new(Point::new(0.0, 800.0), Size::new(1024.0, 100.0));
+        assert_eq!(VirtualGallery::clip_rect(bounds, &below), None);
     }
 }

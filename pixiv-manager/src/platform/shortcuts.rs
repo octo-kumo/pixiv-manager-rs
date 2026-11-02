@@ -1,19 +1,11 @@
-//! The platform's primary shortcut modifier and the labels derived from it.
-//!
-//! Standard application shortcuts use Control on Linux/Windows and Command
-//! (⌘) on macOS. Application code asks [`primary_modifier`] instead of
-//! testing `modifiers.control()`, and renders hints through
-//! [`primary_shortcut`] instead of hard-coding `"Ctrl+F"`.
+//! The platform's primary shortcut modifier and its label.
 
 use iced::keyboard::Modifiers;
 
-/// Is the platform's primary shortcut modifier held?
+/// Control on Linux/Windows, Command on macOS.
 ///
-/// * Linux / Windows — Control
-/// * macOS — Command (Logo)
-///
-/// Deliberately *not* "either Control or Command" on macOS: binding both would
-/// steal Control-based readline/terminal-style bindings and surprises users.
+/// Deliberately not "Ctrl or Command" on macOS: binding both would shadow
+/// Control-based bindings the platform reserves for text editing.
 pub fn primary_modifier(modifiers: Modifiers) -> bool {
     #[cfg(target_os = "macos")]
     {
@@ -25,7 +17,6 @@ pub fn primary_modifier(modifiers: Modifiers) -> bool {
     }
 }
 
-/// The primary modifier as shown in shortcut hints: `Ctrl` or `⌘`.
 pub const fn primary_label() -> &'static str {
     if cfg!(target_os = "macos") {
         "⌘"
@@ -34,8 +25,7 @@ pub const fn primary_label() -> &'static str {
     }
 }
 
-/// Render `primary modifier + key` the way each platform writes it:
-/// `Ctrl+F` / `Ctrl+-` on Linux and Windows, `⌘F` / `⌘-` on macOS.
+/// `Ctrl+F` on Linux/Windows, `⌘F` on macOS.
 pub fn primary_shortcut(key: &str) -> String {
     if cfg!(target_os = "macos") {
         format!("{}{}", primary_label(), key)
@@ -44,36 +34,24 @@ pub fn primary_shortcut(key: &str) -> String {
     }
 }
 
-/// The key cap for "minus" on this platform: the typographic minus reads
-/// better next to ⌘, and `-` matches what users type elsewhere.
-pub const fn minus_label() -> &'static str {
-    if cfg!(target_os = "macos") {
-        "−"
-    } else {
-        "-"
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn control_is_primary_off_macos() {
-        let modifiers = Modifiers::CTRL;
+    fn primary_modifier_is_ctrl_off_macos() {
         #[cfg(not(target_os = "macos"))]
-        assert!(primary_modifier(modifiers));
+        assert!(primary_modifier(Modifiers::CTRL));
         #[cfg(target_os = "macos")]
-        assert!(!primary_modifier(modifiers));
+        assert!(!primary_modifier(Modifiers::CTRL));
     }
 
     #[test]
-    fn logo_is_primary_on_macos_only() {
-        let modifiers = Modifiers::LOGO;
+    fn primary_modifier_is_command_on_macos() {
         #[cfg(target_os = "macos")]
-        assert!(primary_modifier(modifiers));
+        assert!(primary_modifier(Modifiers::LOGO));
         #[cfg(not(target_os = "macos"))]
-        assert!(!primary_modifier(modifiers));
+        assert!(!primary_modifier(Modifiers::LOGO));
     }
 
     #[test]
@@ -85,13 +63,11 @@ mod tests {
     #[test]
     fn labels_match_the_platform() {
         if cfg!(target_os = "macos") {
-            assert_eq!(primary_label(), "⌘");
             assert_eq!(primary_shortcut("F"), "⌘F");
-            assert_eq!(primary_shortcut(minus_label()), "⌘−");
+            assert_eq!(primary_shortcut("-"), "⌘-");
         } else {
-            assert_eq!(primary_label(), "Ctrl");
             assert_eq!(primary_shortcut("F"), "Ctrl+F");
-            assert_eq!(primary_shortcut(minus_label()), "Ctrl+-");
+            assert_eq!(primary_shortcut("-"), "Ctrl+-");
         }
     }
 }

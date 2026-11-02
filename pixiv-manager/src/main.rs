@@ -1,7 +1,5 @@
-// Release GUI builds are windowed applications: Windows must not attach a
-// console window to them. Debug builds keep the console so `RUST_LOG` output
-// stays visible while developing, and `pixiv-manager-cli` is a separate
-// console binary that is unaffected by this attribute.
+// Release GUI builds must not attach a console window on Windows; debug builds
+// keep it for `RUST_LOG`, and the CLI is a separate console binary.
 #![cfg_attr(
     all(target_os = "windows", not(debug_assertions)),
     windows_subsystem = "windows"

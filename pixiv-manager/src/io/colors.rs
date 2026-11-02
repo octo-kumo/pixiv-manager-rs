@@ -1,15 +1,8 @@
-//! Centralized, persistent color storage.
-//!
-//! Every illust's MMCQ palette (5 representative colors) lives here, keyed by
-//! illust id and persisted to a single `colors.json` in the data dir — the
-//! single source of truth for the sRGB/Hue color sorts, the viewer swatches
-//! and the bookmark "process all" metadata pass. Runtime access is through
-//! [`crate::app::state::ImageState::palettes`]; this module owns load/save.
+//! Persisted MMCQ colour palettes, keyed by illust id.
 
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-/// Where the color map lives (alongside the library).
 pub fn colors_path() -> PathBuf {
     crate::io::paths::AppPaths::discover().colors_file()
 }

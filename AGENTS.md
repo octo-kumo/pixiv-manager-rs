@@ -9,59 +9,47 @@ Cargo workspace with two crates:
 
 Logic shared by GUI and CLI (config IO, download paths, pagination, filename rules) lives in `pixiv-manager/src/core.rs` and `src/io/` so the front-ends cannot drift. Put shared behavior there, not in the reducer or CLI modules.
 
-## Cross-platform rules (mandatory)
+## Cross-platform rules
 
-This is a cross-platform desktop app: **Linux x86-64 is supported, Windows
-10/11 x86-64 is supported, macOS is experimental**. Do not introduce
-Linux-only assumptions into shared Rust.
+Linux and Windows are supported; macOS is experimental. Keep shared code
+platform-independent.
 
-- **One codebase.** Never add a per-OS front end, state machine, downloader or
-  config format. OS differences are allowed only in `src/platform/`
-  (`memory.rs`, `shortcuts.rs`, `fs.rs`, `mod.rs`) and `src/io/paths.rs`.
-  Reducers, widgets, provider code, the downloader and `core.rs` must stay free
-  of `cfg(target_os = …)`.
-- **Paths:** never call `dirs::*` outside `io::paths`. Ask
-  `io::paths::AppPaths::discover()` for config/data/cache files. Never hard-code
-  `~/.config/...` in code, tests or UI strings — the settings screen derives its
-  hints from `AppPaths` for exactly this reason.
-- **Persistence:** every persistent write goes through `io::write_atomic` /
-  `io::save_json_atomic` / `io::write_atomic_private` (config, which is `0600`
-  on Unix). Never hand-roll temp-file-plus-rename: the Windows semantics live in
-  `platform::fs::replace_file` (ReplaceFileW / MoveFileExW), and duplicated
-  copies are how the last two Windows bugs happened.
-- **Tests:** isolate with `PIXIV_MANAGER_CONFIG_DIR` (prefer
-  `Command::env(...)` for subprocess tests over `std::env::set_var`). No literal
-  `/tmp`, `$HOME` or `\` paths in portable tests — use `tempfile::tempdir()` or
-  `std::env::temp_dir()`. A test may never touch real user config, cookies,
-  bookmarks or the image cache unless it is `#[ignore]`d as a live test.
-- **Security:** never add browser cookie-database extraction or credential-store
-  scraping; cookies stay user-exported files. Never broaden the onboarding
-  listener off `127.0.0.1`. Never log cookie/token contents.
-- Any PR touching `src/io/`, `src/platform/`, paths or persistence must pass the
-  Linux **and** Windows test jobs in CI.
+- OS-specific behavior belongs in `src/platform/` (fs, memory, shortcuts,
+  fonts) or `src/io/paths.rs`. Legitimate exceptions: `windows_subsystem` in
+  `main.rs`, dependency/target cfgs in `Cargo.toml`, and the pprof/CPU-profiling
+  backend, which is Unix-only.
+- All application paths come from `AppPaths`; never call `dirs::*` elsewhere and
+  never hard-code `~/.config` in code, tests or UI strings.
+- All durable writes go through `io::write_atomic` / `save_json_atomic` /
+  `write_atomic_private`. A failed replacement may leave the filesystem in an
+  ambiguous state: never delete a temp file unless the outcome says the
+  destination is intact.
+- Tests isolate with `PIXIV_MANAGER_CONFIG_DIR` (prefer `Command::env` for
+  subprocesses). No `/tmp` or `$HOME` literals: use `tempfile`/`temp_dir()`.
+  Tests must never touch real config, cookies, bookmarks or caches.
+- Shortcuts use `platform::primary_modifier` / `primary_shortcut` (Ctrl vs ⌘).
+- Never add browser cookie-database extraction or credential scraping; cookies
+  stay user-exported files. Never log cookie or token contents. Keep the
+  onboarding listener on `127.0.0.1`.
+- Changes to `src/io/`, `src/platform/` or paths must pass the Linux **and**
+  Windows test jobs.
 
 ## Commands
 
-CI (`.github/workflows/ci.yml`) is the source of truth and runs a platform
-matrix:
+CI (`.github/workflows/ci.yml`) is the source of truth:
 
 ```bash
-cargo fmt --check                          # Linux only
-cargo clippy --workspace --locked -- -D warnings   # Linux only
-cargo test --workspace --locked            # Linux, Windows, macOS
-cargo build --release --workspace --locked # Linux, Windows, macOS
+cargo fmt --check                                  # Linux
+cargo clippy --workspace --locked -- -D warnings   # Linux
+cargo test --workspace --locked                    # Linux, Windows, macOS
+cargo build --release --workspace --locked         # Linux, Windows, macOS
 ```
 
-- Focused test: `cargo test -p pixiv-manager <name>`; integration target: `cargo test -p pixiv-manager --test ui_tests`.
-- `rust-toolchain` pins **stable** (same toolchain locally and in CI, so a
-  nightly-only construct cannot slip in).
-- `--locked` everywhere: `Cargo.lock` is committed and every platform and
-  released artifact resolves the same dependency graph.
+- Focused test: `cargo test -p pixiv-manager <name>`; integration target:
+  `cargo test -p pixiv-manager --test ui_tests`.
+- `rust-toolchain` pins **stable**; `--locked` everywhere.
 - `.cargo/config.toml` defines `cargo b` / `t` / `cl` aliases.
-- `./install.sh` is the **Linux** installer (builds release, installs to
-  `~/.local/bin`, KDE desktop entry, committed icon from `assets/icons/`). Keep
-  it Linux-specific; Windows/macOS packaging lives in `scripts/package-*.{ps1,sh}`
-  and `.github/workflows/release.yml`.
+- `./install.sh` is the Linux installer and stays Linux-specific.
 
 ## Tests
 
@@ -94,4 +82,4 @@ cargo build --release --workspace --locked # Linux, Windows, macOS
 - `./scripts/profile.sh` — deterministic headless profiler against a mock Pixiv (no credentials); `./scripts/profile-gui.sh` — drives the real GUI with `xdotool` using real config unless `--temp`.
 - The `profiling` feature adds a tagged global allocator, CPU sampling, and an HTTP control server (`PIXIV_MANAGER_PROFILE_PORT` / `PIXIV_MANAGER_PROFILE_DIR`); scripts write `report.md` / `flamegraph.svg` / `hotspots.md`.
 - CPU sampling uses `pprof`, which is **Unix-only** (`pprof` is a `cfg(unix)` dependency). On Windows the feature still builds: `profiling::cpu` becomes a stub that reports CPU sampling as unsupported, while allocation profiling, timings and reports keep working. Keep it that way — a normal Windows build must never depend on POSIX profiling.
-- Memory figures in the debug overlay come from `platform::memory_stats()` (sysinfo) and may be `None`, rendered as `N/A`. Never read `/proc` outside a Linux-specific implementation.
+- Memory figures come from `platform::memory_stats()` (sysinfo) and may be `None`, rendered as `N/A`.

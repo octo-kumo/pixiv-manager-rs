@@ -1,37 +1,41 @@
-//! Atomic file replacement — the one primitive every persistent writer uses.
+//! Atomic file replacement.
 //!
-//! Callers write a temp file next to the destination and then hand both paths
-//! to [`replace_file`], which swaps them in a single filesystem operation:
+//! The caller writes a temp file next to the destination and passes both paths
+//! to [`replace_file`], which reports one of three states:
 //!
-//! * **Unix** — `rename(2)`: atomic, and the destination is replaced without
-//!   ever disappearing. The parent directory is then fsynced so the rename
-//!   itself survives a power loss.
-//! * **Windows** — `ReplaceFileW` for an existing destination (the documented
-//!   atomic replace API; it also keeps the original ACL and attributes), and
-//!   `MoveFileExW(MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)` when
-//!   there is nothing to replace yet. Before this, the code did
-//!   `remove_file(dest)` + `rename`, which leaves a window where the config /
-//!   library simply does not exist.
+//! * [`ReplaceOutcome::Replaced`] — the destination holds the new content;
+//! * [`ReplaceOutcome::SourceIntact`] — nothing changed, so the caller may
+//!   delete its temp file;
+//! * [`ReplaceOutcome::Indeterminate`] — the filesystem may have changed, so
+//!   the temp file must be kept as the recovery copy.
 //!
-//! Both paths retry on the transient sharing violations that Windows
-//! antivirus/indexer handles cause when they hold the destination open.
+//! The third state exists because `ReplaceFileW` is not transactional in every
+//! failure mode: it can remove the original before discovering it cannot move
+//! the replacement into place. Treating that as "the write failed, delete the
+//! temp" would destroy the only complete copy.
 
 use std::io;
 use std::path::Path;
 
-/// How many times a Windows replace is retried before giving up.
-#[cfg(windows)]
-const REPLACE_RETRIES: u32 = 12;
+/// The result of an attempted replacement.
+#[derive(Debug)]
+pub enum ReplaceOutcome {
+    /// `dest` now holds the new content and `src` is gone.
+    Replaced,
+    /// Nothing changed: `dest` still holds its previous content and `src` is
+    /// still intact.
+    SourceIntact(io::Error),
+    /// The failure happened after filesystem state changed. `dest` may hold the
+    /// previous content or be missing, and `src` may or may not exist. Never
+    /// delete `src` in this state.
+    Indeterminate(io::Error),
+}
 
-/// Replace `src` with `dest` (both must be on the same filesystem).
-///
-/// On success `src` no longer exists and `dest` holds its contents. On failure
-/// the previous `dest` (if any) is left untouched and `src` may still exist —
-/// callers treat a failure as "the write did not happen".
-pub fn replace_file(src: &Path, dest: &Path) -> io::Result<()> {
+/// Replace `dest` with the contents of `src` (same filesystem required).
+pub fn replace_file(src: &Path, dest: &Path) -> ReplaceOutcome {
     #[cfg(unix)]
     {
-        unix::rename_over(src, dest)
+        unix::replace(src, dest)
     }
     #[cfg(windows)]
     {
@@ -39,8 +43,28 @@ pub fn replace_file(src: &Path, dest: &Path) -> io::Result<()> {
     }
     #[cfg(not(any(unix, windows)))]
     {
-        // No platform-specific guarantee available: fall back to the most
-        // portable rename. (Not reachable on the targets we ship.)
+        match std::fs::rename(src, dest) {
+            Ok(()) => ReplaceOutcome::Replaced,
+            Err(e) => ReplaceOutcome::Indeterminate(e),
+        }
+    }
+}
+
+/// Move `src` onto `dest`, replacing it, without preserving metadata.
+///
+/// Used when the destination is missing and for recovery after an
+/// [`ReplaceOutcome::Indeterminate`] result.
+pub fn move_file(src: &Path, dest: &Path) -> io::Result<()> {
+    #[cfg(unix)]
+    {
+        unix::move_file(src, dest)
+    }
+    #[cfg(windows)]
+    {
+        windows::move_file(src, dest)
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
         std::fs::rename(src, dest)
     }
 }
@@ -50,16 +74,30 @@ mod unix {
     use std::io;
     use std::path::Path;
 
-    pub(super) fn rename_over(src: &Path, dest: &Path) -> io::Result<()> {
-        std::fs::rename(src, dest)?;
-        // Make the directory entry itself durable. Best effort: some
-        // filesystems (and every non-Unix target) cannot sync a directory,
-        // and failing here would report an error for a write that succeeded.
-        if let Some(parent) = dest.parent() {
+    use super::ReplaceOutcome;
+
+    fn sync_parent(path: &Path) {
+        if let Some(parent) = path.parent() {
             if let Ok(dir) = std::fs::File::open(parent) {
                 let _ = dir.sync_all();
             }
         }
+    }
+
+    pub(super) fn replace(src: &Path, dest: &Path) -> ReplaceOutcome {
+        // rename(2) either replaces the destination or changes nothing.
+        match std::fs::rename(src, dest) {
+            Ok(()) => {
+                sync_parent(dest);
+                ReplaceOutcome::Replaced
+            }
+            Err(e) => ReplaceOutcome::SourceIntact(e),
+        }
+    }
+
+    pub(super) fn move_file(src: &Path, dest: &Path) -> io::Result<()> {
+        std::fs::rename(src, dest)?;
+        sync_parent(dest);
         Ok(())
     }
 }
@@ -73,14 +111,27 @@ mod windows {
 
     use windows_sys::Win32::Storage::FileSystem::{
         MoveFileExW, ReplaceFileW, MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH,
-        REPLACEFILE_IGNORE_MERGE_ERRORS,
+        REPLACEFILE_IGNORE_ACL_ERRORS, REPLACEFILE_IGNORE_MERGE_ERRORS,
     };
+
+    use super::ReplaceOutcome;
+
+    /// Antivirus scanners, the search indexer and a concurrent replace from
+    /// another process hold the destination open for a moment; retried.
+    const TRANSIENT_RETRIES: u32 = 16;
 
     const ERROR_FILE_NOT_FOUND: i32 = 2;
     const ERROR_PATH_NOT_FOUND: i32 = 3;
     const ERROR_ACCESS_DENIED: i32 = 5;
     const ERROR_SHARING_VIOLATION: i32 = 32;
     const ERROR_LOCK_VIOLATION: i32 = 33;
+    /// "Unable to remove the file to be replaced": the original is still in
+    /// place, so this is a retryable no-op (it happens when another process
+    /// replaces the same destination concurrently).
+    const ERROR_UNABLE_TO_REMOVE_REPLACED: i32 = 1175;
+    /// Documented as "the file being replaced retains its original name"; a
+    /// failed ACL/attribute merge reports the same code.
+    const ERROR_UNABLE_TO_MOVE_REPLACEMENT: i32 = 1176;
 
     fn wide(path: &Path) -> Vec<u16> {
         path.as_os_str()
@@ -89,12 +140,19 @@ mod windows {
             .collect()
     }
 
-    fn move_over(src: &Path, dest: &Path) -> io::Result<()> {
+    fn is_transient(code: i32) -> bool {
+        matches!(
+            code,
+            ERROR_ACCESS_DENIED
+                | ERROR_SHARING_VIOLATION
+                | ERROR_LOCK_VIOLATION
+                | ERROR_UNABLE_TO_REMOVE_REPLACED
+        )
+    }
+
+    pub(super) fn move_file(src: &Path, dest: &Path) -> io::Result<()> {
         let src_w = wide(src);
         let dest_w = wide(dest);
-        // MOVEFILE_WRITE_THROUGH makes the rename durable before returning;
-        // REPLACE_EXISTING is what makes this an *overwrite* (and what the old
-        // remove-then-rename workaround was emulating).
         let ok = unsafe {
             MoveFileExW(
                 src_w.as_ptr(),
@@ -109,10 +167,7 @@ mod windows {
         }
     }
 
-    fn replace_once(src: &Path, dest: &Path) -> io::Result<()> {
-        if !dest.exists() {
-            return move_over(src, dest);
-        }
+    fn replace_file_w(dest: &Path, src: &Path, flags: u32) -> io::Result<()> {
         let dest_w = wide(dest);
         let src_w = wide(src);
         let ok = unsafe {
@@ -120,46 +175,74 @@ mod windows {
                 dest_w.as_ptr(),
                 src_w.as_ptr(),
                 std::ptr::null(),
-                REPLACEFILE_IGNORE_MERGE_ERRORS,
+                flags,
                 std::ptr::null(),
                 std::ptr::null(),
             )
         };
-        if ok != 0 {
-            return Ok(());
-        }
-        let err = io::Error::last_os_error();
-        match err.raw_os_error() {
-            // Lost a race with something that removed the destination.
-            Some(ERROR_FILE_NOT_FOUND) | Some(ERROR_PATH_NOT_FOUND) => move_over(src, dest),
-            _ => Err(err),
+        if ok == 0 {
+            Err(io::Error::last_os_error())
+        } else {
+            Ok(())
         }
     }
 
-    pub(super) fn replace(src: &Path, dest: &Path) -> io::Result<()> {
-        let mut last = io::Error::other("replace_file: retries exhausted");
-        for attempt in 0..super::REPLACE_RETRIES {
-            match replace_once(src, dest) {
-                Ok(()) => return Ok(()),
-                Err(e) => {
-                    // A scanner / indexer / backup agent holding the file open
-                    // for a moment is normal on Windows; retry briefly instead
-                    // of failing the user's save.
-                    let transient = matches!(
-                        e.raw_os_error(),
-                        Some(ERROR_ACCESS_DENIED)
-                            | Some(ERROR_SHARING_VIOLATION)
-                            | Some(ERROR_LOCK_VIOLATION)
-                    );
-                    if !transient {
-                        return Err(e);
-                    }
-                    last = e;
-                    std::thread::sleep(Duration::from_millis(5 * u64::from(attempt + 1)));
+    fn replace_once(src: &Path, dest: &Path) -> ReplaceOutcome {
+        if !dest.exists() {
+            return match move_file(src, dest) {
+                Ok(()) => ReplaceOutcome::Replaced,
+                Err(e) => ReplaceOutcome::SourceIntact(e),
+            };
+        }
+
+        let err = match replace_file_w(dest, src, 0) {
+            Ok(()) => return ReplaceOutcome::Replaced,
+            Err(e) => e,
+        };
+
+        match err.raw_os_error() {
+            Some(ERROR_FILE_NOT_FOUND) | Some(ERROR_PATH_NOT_FOUND) => match move_file(src, dest) {
+                Ok(()) => ReplaceOutcome::Replaced,
+                Err(e) => ReplaceOutcome::SourceIntact(e),
+            },
+            // A failed ACL/attribute merge also reports 1176. Retry once with
+            // the merge errors ignored (logged) rather than leaving the file
+            // permanently unsaveable.
+            Some(ERROR_UNABLE_TO_MOVE_REPLACEMENT) => {
+                log::warn!(
+                    "[fs] metadata merge failed for {}, retrying without merge: {err}",
+                    dest.display()
+                );
+                match replace_file_w(
+                    dest,
+                    src,
+                    REPLACEFILE_IGNORE_MERGE_ERRORS | REPLACEFILE_IGNORE_ACL_ERRORS,
+                ) {
+                    Ok(()) => ReplaceOutcome::Replaced,
+                    Err(retry_err) => ReplaceOutcome::SourceIntact(retry_err),
                 }
             }
+            Some(code) if is_transient(code) => ReplaceOutcome::SourceIntact(err),
+            // 1175/1177 (original already removed) and anything unknown is
+            // ambiguous: guessing "intact" would let the caller delete the
+            // only complete copy.
+            _ => ReplaceOutcome::Indeterminate(err),
         }
-        Err(last)
+    }
+
+    pub(super) fn replace(src: &Path, dest: &Path) -> ReplaceOutcome {
+        let mut last = io::Error::other("replace_file: retries exhausted");
+        for attempt in 0..TRANSIENT_RETRIES {
+            match replace_once(src, dest) {
+                ReplaceOutcome::SourceIntact(e) if is_transient(e.raw_os_error().unwrap_or(0)) => {
+                    last = e;
+                    let backoff = (5 * u64::from(attempt + 1)).min(50);
+                    std::thread::sleep(Duration::from_millis(backoff));
+                }
+                other => return other,
+            }
+        }
+        ReplaceOutcome::SourceIntact(last)
     }
 }
 
@@ -167,54 +250,158 @@ mod windows {
 mod tests {
     use super::*;
 
+    fn write(path: &Path, bytes: &[u8]) {
+        std::fs::write(path, bytes).unwrap();
+    }
+
+    fn temp_for(dir: &Path, name: &str) -> std::path::PathBuf {
+        dir.join(format!("{name}.pixiv-manager-tmp-1"))
+    }
+
     #[test]
     fn replaces_existing_file() {
         let dir = tempfile::tempdir().unwrap();
         let dest = dir.path().join("state.json");
-        std::fs::write(&dest, b"old").unwrap();
-        let tmp = dir.path().join("state.json.tmp");
-        std::fs::write(&tmp, b"new").unwrap();
-        replace_file(&tmp, &dest).unwrap();
+        write(&dest, b"old");
+        let tmp = temp_for(dir.path(), "state.json");
+        write(&tmp, b"new");
+        assert!(matches!(
+            replace_file(&tmp, &dest),
+            ReplaceOutcome::Replaced
+        ));
         assert_eq!(std::fs::read(&dest).unwrap(), b"new");
-        assert!(!tmp.exists(), "temp file must be consumed");
+        assert!(!tmp.exists());
     }
 
     #[test]
     fn creates_missing_file() {
         let dir = tempfile::tempdir().unwrap();
         let dest = dir.path().join("fresh.toml");
-        let tmp = dir.path().join("fresh.toml.tmp");
-        std::fs::write(&tmp, b"hello").unwrap();
-        replace_file(&tmp, &dest).unwrap();
+        let tmp = temp_for(dir.path(), "fresh.toml");
+        write(&tmp, b"hello");
+        assert!(matches!(
+            replace_file(&tmp, &dest),
+            ReplaceOutcome::Replaced
+        ));
         assert_eq!(std::fs::read(&dest).unwrap(), b"hello");
     }
 
-    /// Windows used to be unable to overwrite an existing file at all via the
-    /// old `rename`-after-`remove_file` dance; repeated saves are the exact
-    /// sequence that must keep working (viewer transforms, colors, bookmarks).
     #[test]
     fn replaces_repeatedly() {
         let dir = tempfile::tempdir().unwrap();
         let dest = dir.path().join("colors.json");
         for i in 0..8u8 {
-            let tmp = dir.path().join("colors.json.tmp");
-            std::fs::write(&tmp, [i; 3]).unwrap();
-            replace_file(&tmp, &dest).unwrap();
+            let tmp = dir
+                .path()
+                .join(format!("colors.json.pixiv-manager-tmp-{i}"));
+            write(&tmp, &[i; 3]);
+            assert!(matches!(
+                replace_file(&tmp, &dest),
+                ReplaceOutcome::Replaced
+            ));
             assert_eq!(std::fs::read(&dest).unwrap(), [i; 3]);
         }
     }
 
     #[test]
-    fn missing_source_is_an_error() {
+    fn missing_source_leaves_destination_intact() {
         let dir = tempfile::tempdir().unwrap();
         let dest = dir.path().join("dest.bin");
-        std::fs::write(&dest, b"keep me").unwrap();
-        let err = replace_file(&dir.path().join("nope.tmp"), &dest).unwrap_err();
+        write(&dest, b"keep me");
+        let outcome = replace_file(&dir.path().join("nope.tmp"), &dest);
         assert!(
-            !err.to_string().is_empty(),
-            "the failure must describe itself: {err:?}"
+            matches!(outcome, ReplaceOutcome::SourceIntact(_)),
+            "expected SourceIntact, got {outcome:?}"
         );
-        // The destination must be left untouched when the replace fails.
         assert_eq!(std::fs::read(&dest).unwrap(), b"keep me");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn read_only_directory_is_source_intact() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let sub = dir.path().join("locked");
+        std::fs::create_dir(&sub).unwrap();
+        let dest = sub.join("state.json");
+        write(&dest, b"old");
+        let tmp = temp_for(dir.path(), "state.json");
+        write(&tmp, b"new");
+        let mode = std::fs::metadata(&sub).unwrap().permissions().mode();
+        std::fs::set_permissions(&sub, std::fs::Permissions::from_mode(0o500)).unwrap();
+        let outcome = replace_file(&tmp, &dest);
+        std::fs::set_permissions(&sub, std::fs::Permissions::from_mode(mode)).unwrap();
+        assert!(
+            matches!(outcome, ReplaceOutcome::SourceIntact(_)),
+            "permission failure must be reported as intact: {outcome:?}"
+        );
+        assert!(tmp.exists());
+        assert_eq!(std::fs::read(&dest).unwrap(), b"old");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn read_only_destination_is_source_intact() {
+        let dir = tempfile::tempdir().unwrap();
+        let dest = dir.path().join("state.json");
+        write(&dest, b"old");
+        let mut perms = std::fs::metadata(&dest).unwrap().permissions();
+        perms.set_readonly(true);
+        std::fs::set_permissions(&dest, perms).unwrap();
+        let tmp = temp_for(dir.path(), "state.json");
+        write(&tmp, b"new");
+
+        let outcome = replace_file(&tmp, &dest);
+        let mut perms = std::fs::metadata(&dest).unwrap().permissions();
+        perms.set_readonly(false);
+        std::fs::set_permissions(&dest, perms).unwrap();
+
+        assert!(
+            matches!(outcome, ReplaceOutcome::SourceIntact(_)),
+            "read-only destination must be reported as intact: {outcome:?}"
+        );
+        assert!(tmp.exists());
+        assert_eq!(std::fs::read(&dest).unwrap(), b"old");
+    }
+
+    /// A handle opened without `FILE_SHARE_DELETE` is what scanners do; the
+    /// destination must survive and the replacement file must not be lost.
+    #[cfg(windows)]
+    #[test]
+    fn destination_held_open_is_source_intact() {
+        use std::os::windows::fs::OpenOptionsExt;
+
+        let dir = tempfile::tempdir().unwrap();
+        let dest = dir.path().join("state.json");
+        write(&dest, b"old");
+        let tmp = temp_for(dir.path(), "state.json");
+        write(&tmp, b"new");
+
+        let holder = std::fs::OpenOptions::new()
+            .read(true)
+            .share_mode(0)
+            .open(&dest)
+            .unwrap();
+        let outcome = replace_file(&tmp, &dest);
+        drop(holder);
+
+        assert!(
+            matches!(outcome, ReplaceOutcome::SourceIntact(_)),
+            "sharing violation must be reported as intact: {outcome:?}"
+        );
+        assert!(tmp.exists());
+        assert_eq!(std::fs::read(&dest).unwrap(), b"old");
+    }
+
+    #[test]
+    fn move_file_replaces_destination() {
+        let dir = tempfile::tempdir().unwrap();
+        let dest = dir.path().join("a.bin");
+        let src = dir.path().join("b.bin");
+        write(&dest, b"old");
+        write(&src, b"new");
+        move_file(&src, &dest).unwrap();
+        assert_eq!(std::fs::read(&dest).unwrap(), b"new");
+        assert!(!src.exists());
     }
 }

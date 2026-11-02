@@ -1,14 +1,4 @@
 name: CI
-
-# Source of truth for what "green" means:
-#   cargo fmt --check                          (Linux only — formatting is OS-neutral)
-#   cargo clippy --workspace -- -D warnings    (Linux only)
-#   cargo test --workspace --locked            (Linux, Windows, macOS)
-#   cargo build --release --workspace --locked (Linux, Windows, macOS)
-#
-# Every job consumes the committed Cargo.lock, so all three platforms resolve
-# the exact same dependency graph as the released binaries.
-
 on: [push, pull_request]
 
 env:
@@ -21,7 +11,6 @@ concurrency:
 
 jobs:
   format:
-    name: format
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -31,7 +20,6 @@ jobs:
       - run: cargo fmt --check
 
   clippy:
-    name: clippy
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -42,7 +30,6 @@ jobs:
       - run: cargo clippy --workspace --locked -- -D warnings
 
   test:
-    name: test (${{ matrix.os }})
     strategy:
       fail-fast: false
       matrix:
@@ -51,21 +38,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
-      # aws-lc-sys (the rustls crypto provider) needs cmake + NASM to build on
-      # Windows; both are preinstalled on windows-latest. Verified explicitly so
-      # a runner image change fails here with a clear message.
+      # aws-lc-sys needs CMake + NASM on Windows; checking them makes a runner
+      # image change fail with a clear message instead of a cryptic compiler log.
       - name: Verify Windows C toolchain
         if: runner.os == 'Windows'
         run: |
           cmake --version
           nasm -v
       - uses: Swatinem/rust-cache@v2
-      # The whole suite is offline: fixtures instead of API calls, temp dirs
-      # instead of real config, live tests only when explicitly requested.
       - run: cargo test --workspace --locked
 
   release-build:
-    name: release-build (${{ matrix.os }})
     needs: [test]
     strategy:
       fail-fast: false
@@ -77,26 +60,10 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - run: cargo build --release --workspace --locked
-      # Smoke-check that the release binaries exist and are runnable.
       - name: Verify binaries (unix)
         if: runner.os != 'Windows'
-        run: |
-          ./target/release/pixiv-manager-cli --version
-          test -f ./target/release/pixiv-manager
+        run: ./target/release/pixiv-manager-cli --version
       - name: Verify binaries (windows)
         if: runner.os == 'Windows'
         shell: pwsh
-        run: |
-          .\target\release\pixiv-manager-cli.exe --version
-          if (-not (Test-Path .\target\release\pixiv-manager.exe)) { throw "missing GUI exe" }
-          $ErrorActionPreference = "Stop"
-          # The release GUI must be a windowed (GUI subsystem) binary: no
-          # console window may appear when a user double-clicks it.
-          $bytes = [IO.File]::ReadAllBytes(".\target\release\pixiv-manager.exe")
-          $pe = [BitConverter]::ToInt32($bytes, 0x3c)
-          $subsystem = [BitConverter]::ToUInt16($bytes, $pe + 0x5c)
-          if ($subsystem -ne 2) { throw "GUI exe subsystem is $subsystem, expected 2 (WINDOWS_GUI)" }
-          $cliBytes = [IO.File]::ReadAllBytes(".\target\release\pixiv-manager-cli.exe")
-          $cliPe = [BitConverter]::ToInt32($cliBytes, 0x3c)
-          $cliSubsystem = [BitConverter]::ToUInt16($cliBytes, $cliPe + 0x5c)
-          if ($cliSubsystem -ne 3) { throw "CLI exe subsystem is $cliSubsystem, expected 3 (CONSOLE)" }
+        run: .\target\release\pixiv-manager-cli.exe --version

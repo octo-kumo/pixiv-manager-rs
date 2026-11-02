@@ -1,266 +1,48 @@
 name: Release
-
-# Staged release architecture:
-#
-#   prepare-version ──┬─> build-linux   ─┐
-#                     ├─> build-windows ─┼─> publish
-#                     └─> build-macos   ─┘
-#
-# * `prepare-version` decides the version ONCE and exposes it as a job output;
-#   no platform job may compute its own version.
-# * every build job checks out the same commit, stamps that one version, and
-#   builds with the committed Cargo.lock (`--locked`);
-# * exactly one job (`publish`) creates the GitHub Release, so parallel jobs can
-#   never race to create the same release;
-# * signing secrets are only present for non-fork runs: the workflow is
-#   triggered by `workflow_run` on master or manually, never by
-#   `pull_request`, and secret-dependent steps degrade to "unsigned" with a
-#   warning rather than failing the build.
-
+# Publishes a Linux tarball after CI succeeds on master. The version is
+# MAJOR.MINOR from [workspace.package]; the patch auto-increments from the
+# latest matching tag (reset to 0 when MAJOR.MINOR is bumped by hand).
 on:
   workflow_run:
     workflows: [CI]
     types: [completed]
     branches: [master]
-  workflow_dispatch:
-    inputs:
-      version:
-        description: "Override the computed version (MAJOR.MINOR.PATCH)"
-        required: false
 
 permissions:
   contents: write
 
-concurrency:
-  group: release
-  cancel-in-progress: false
-
-env:
-  CARGO_TERM_COLOR: always
+concurrency: release
 
 jobs:
-  prepare-version:
-    name: prepare-version
-    if: >-
-      github.event_name == 'workflow_dispatch' ||
-      (github.event.workflow_run.conclusion == 'success' &&
-       github.event.workflow_run.event == 'push')
+  release:
+    if: github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push'
     runs-on: ubuntu-latest
-    outputs:
-      version: ${{ steps.ver.outputs.version }}
-      tag: ${{ steps.ver.outputs.tag }}
-      sha: ${{ steps.ver.outputs.sha }}
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+          ref: ${{ github.event.workflow_run.head_sha }}
           fetch-depth: 0
-      - name: Compute version once
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Compute version
         id: ver
         run: |
-          sha=$(git rev-parse HEAD)
-          if [[ -n "${{ github.event.inputs.version }}" ]]; then
-            version="${{ github.event.inputs.version }}"
-          else
-            base=$(grep -m1 '^version' Cargo.toml | sed -E 's/.*"([0-9]+\.[0-9]+)\.[0-9]+".*/\1/')
-            last=$(git tag -l "v${base}.*" | sed -E 's/.*\.([0-9]+)$/\1/' | sort -n | tail -1)
-            next=$(( ${last:--1} + 1 ))
-            version="${base}.${next}"
-          fi
-          echo "version=${version}" >> "$GITHUB_OUTPUT"
-          echo "tag=v${version}" >> "$GITHUB_OUTPUT"
-          echo "sha=${sha}" >> "$GITHUB_OUTPUT"
-          echo "Releasing ${version} from ${sha}"
-
-  build-linux:
-    name: build-linux
-    needs: prepare-version
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ needs.prepare-version.outputs.sha }}
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+          base=$(grep -m1 '^version' Cargo.toml | sed -E 's/.*"([0-9]+\.[0-9]+)\.[0-9]+".*/\1/')
+          last=$(git tag -l "v${base}.*" | sed -E 's/.*\.([0-9]+)$/\1/' | sort -n | tail -1)
+          next=$(( ${last:--1} + 1 ))
+          echo "version=${base}.${next}" >> "$GITHUB_OUTPUT"
       - name: Stamp version
-        run: ./scripts/stamp-version.sh "${{ needs.prepare-version.outputs.version }}"
-      - run: cargo test --workspace --locked
-      - run: cargo build --release --workspace --locked
+        run: |
+          sed -i -E '0,/^version = .*/s//version = "${{ steps.ver.outputs.version }}"/' Cargo.toml
+      - run: cargo build --release --workspace
       - name: Package
-        run: ./scripts/package-linux.sh "${{ needs.prepare-version.outputs.version }}"
-      - name: Hash
-        run: cd dist && sha256sum *.tar.gz > SHA256SUMS.txt
-      - uses: actions/upload-artifact@v4
-        with:
-          name: linux
-          path: dist/*
-          if-no-files-found: error
-
-  build-windows:
-    name: build-windows
-    needs: prepare-version
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ needs.prepare-version.outputs.sha }}
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-      - name: Install WiX
-        # Pinned to WiX 5: WiX 6+ refuses to run without accepting the
-        # Open Source Maintenance Fee EULA (WIX7015), which is not something a
-        # public build should be forced to accept.
-        run: dotnet tool install --global wix --version 5.0.2
-      - name: Stamp version
-        shell: bash
-        run: ./scripts/stamp-version.sh "${{ needs.prepare-version.outputs.version }}"
-      - run: cargo test --workspace --locked
-      - run: cargo build --release --workspace --locked
-      - name: Verify release binaries
-        shell: pwsh
         run: |
-          $ErrorActionPreference = "Stop"
-          .\target\release\pixiv-manager-cli.exe --version
-          if (-not (Test-Path .\target\release\pixiv-manager.exe)) { throw "missing GUI exe" }
-      - name: Package ZIP + MSI (+ sign when secrets exist)
-        shell: pwsh
-        env:
-          WINDOWS_CERT_PFX_BASE64: ${{ secrets.WINDOWS_CERT_PFX_BASE64 }}
-          WINDOWS_CERT_PASSWORD: ${{ secrets.WINDOWS_CERT_PASSWORD }}
-        run: |
-          $env:Path = "$env:USERPROFILE\.dotnet\tools;$env:Path"
-          ./scripts/package-windows.ps1 -Version "${{ needs.prepare-version.outputs.version }}"
-      - uses: actions/upload-artifact@v4
-        with:
-          name: windows
-          path: dist/*
-          if-no-files-found: error
-
-  build-macos:
-    name: build-macos
-    needs: prepare-version
-    runs-on: macos-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ needs.prepare-version.outputs.sha }}
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: aarch64-apple-darwin,x86_64-apple-darwin
-      - uses: Swatinem/rust-cache@v2
-      - name: Stamp version
-        run: ./scripts/stamp-version.sh "${{ needs.prepare-version.outputs.version }}"
-      - run: cargo test --workspace --locked
-      - name: Import Developer ID certificate
-        if: ${{ env.MACOS_CERT_P12_BASE64 != '' }}
-        env:
-          MACOS_CERT_P12_BASE64: ${{ secrets.MACOS_CERT_P12_BASE64 }}
-          MACOS_CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
-        run: |
-          keychain="$RUNNER_TEMP/signing.keychain-db"
-          echo "$MACOS_CERT_P12_BASE64" | base64 --decode > "$RUNNER_TEMP/cert.p12"
-          security create-keychain -p actions "$keychain"
-          security set-keychain-settings -lut 21600 "$keychain"
-          security unlock-keychain -p actions "$keychain"
-          security import "$RUNNER_TEMP/cert.p12" -k "$keychain" -P "$MACOS_CERT_PASSWORD" \
-            -T /usr/bin/codesign -T /usr/bin/security
-          security list-keychains -d user -s "$keychain" $(security list-keychains -d user | tr -d '"')
-          security set-key-partition-list -S apple-tool:,apple: -k actions "$keychain"
-          rm -f "$RUNNER_TEMP/cert.p12"
-      - name: Package DMG + CLI tarball
-        env:
-          MACOS_SIGN_IDENTITY: ${{ secrets.MACOS_SIGN_IDENTITY }}
-          MACOS_TEAM_ID: ${{ secrets.MACOS_TEAM_ID }}
-          MACOS_NOTARY_APPLE_ID: ${{ secrets.MACOS_NOTARY_APPLE_ID }}
-          MACOS_NOTARY_PASSWORD: ${{ secrets.MACOS_NOTARY_PASSWORD }}
-        run: ./scripts/package-macos.sh "${{ needs.prepare-version.outputs.version }}"
-      - name: Hash
-        run: cd dist && shasum -a 256 *.dmg *.tar.gz > SHA256SUMS.txt
-      - uses: actions/upload-artifact@v4
-        with:
-          name: macos
-          path: dist/*
-          if-no-files-found: error
-
-  publish:
-    name: publish
-    needs: [prepare-version, build-linux, build-windows, build-macos]
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ needs.prepare-version.outputs.sha }}
-      - uses: actions/download-artifact@v4
-        with:
-          path: dist
-          merge-multiple: true
-      - name: Verify every expected artifact exists
-        run: |
-          set -euo pipefail
-          version="${{ needs.prepare-version.outputs.version }}"
-          expected=(
-            "pixiv-manager-${version}-x86_64-linux.tar.gz"
-            "pixiv-manager-${version}-x86_64-windows.zip"
-            "PixivManager-${version}-x86_64.msi"
-            "Pixiv-Manager-${version}-universal.dmg"
-            "pixiv-manager-cli-${version}-macos.tar.gz"
-          )
-          ls -l dist
-          for artifact in "${expected[@]}"; do
-            if [[ ! -f "dist/${artifact}" ]]; then
-              echo "::error::missing release artifact: ${artifact}"
-              exit 1
-            fi
-          done
-          echo "all expected artifacts present"
-      - name: Verify signatures where applicable
-        run: |
-          set -euo pipefail
-          version="${{ needs.prepare-version.outputs.version }}"
-          # On Linux we cannot run signtool/spctl; the presence of the
-          # platform SHA256SUMS.txt files produced after signing proves the
-          # signed bytes were hashed. The signing steps themselves fail the
-          # build when a configured signature does not verify.
-          for f in dist/*SHA256SUMS.txt; do
-            [[ -e "$f" ]] || continue
-            echo "--- $f"; cat "$f"
-          done
-          # Linux hashes are recomputable here; verify them.
-          if [[ -f dist/SHA256SUMS.txt ]] && grep -q linux dist/SHA256SUMS.txt; then
-            (cd dist && grep linux SHA256SUMS.txt | sha256sum -c -)
-          fi
-      - name: Generate combined SHA256SUMS
-        run: |
-          cd dist
-          rm -f SHA256SUMS.txt SHA256SUMS-linux.txt SHA256SUMS-windows.txt SHA256SUMS-macos.txt
-          # Remove the per-platform hash files (they were folded into the
-          # combined manifest below).
-          find . -maxdepth 1 -name "*SHA256SUMS*.txt" -delete
-          sha256sum * > SHA256SUMS.txt
-          cat SHA256SUMS.txt
-      - name: Publish exactly one release
+          name=pixiv-manager-${{ steps.ver.outputs.version }}-x86_64-linux
+          mkdir "$name"
+          cp target/release/pixiv-manager target/release/pixiv-manager-cli README.md "$name"/
+          tar czf "$name.tar.gz" "$name"
+      - name: Publish release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          set -euo pipefail
-          tag="${{ needs.prepare-version.outputs.tag }}"
-          sha="${{ needs.prepare-version.outputs.sha }}"
-          {
-            echo "Built from \`${sha}\` with the committed Cargo.lock."
-            echo ""
-            echo "### Artifacts"
-            echo ""
-            echo "| platform | file |"
-            echo "|---|---|"
-            echo "| Linux x86-64 | \`pixiv-manager-${{ needs.prepare-version.outputs.version }}-x86_64-linux.tar.gz\` |"
-            echo "| Windows x86-64 (portable) | \`pixiv-manager-${{ needs.prepare-version.outputs.version }}-x86_64-windows.zip\` |"
-            echo "| Windows x86-64 (installer) | \`PixivManager-${{ needs.prepare-version.outputs.version }}-x86_64.msi\` |"
-            echo "| macOS (Universal 2) | \`Pixiv-Manager-${{ needs.prepare-version.outputs.version }}-universal.dmg\` |"
-            echo "| macOS CLI | \`pixiv-manager-cli-${{ needs.prepare-version.outputs.version }}-macos.tar.gz\` |"
-            echo ""
-            echo "Verify downloads with \`SHA256SUMS.txt\`."
-          } > release-notes.md
-          gh release create "$tag" dist/* \
-            --target "$sha" \
-            --title "$tag" \
-            --notes-file release-notes.md
+          v=v${{ steps.ver.outputs.version }}
+          gh release create "$v" ./*.tar.gz --target "${{ github.event.workflow_run.head_sha }}" --title "$v" --generate-notes

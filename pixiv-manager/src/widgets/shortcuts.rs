@@ -2,15 +2,11 @@
 //! every binding; Esc or F1 closes it.
 
 use crate::app::message::Message;
+use crate::platform::shortcuts::primary_shortcut;
 use crate::theme;
 
-use crate::platform::shortcuts::{minus_label, primary_shortcut};
-
-/// Every keyboard shortcut the app supports, shown in the overlay (and the
-/// help screen's hotkeys section).
-///
-/// The primary-modifier rows are generated from the platform layer, so macOS
-/// shows `⌘F` / `⌘−` while Linux and Windows show `Ctrl+F` / `Ctrl+-`.
+/// Every keyboard shortcut, shown in the overlay and the help screen. The
+/// primary-modifier rows come from the platform layer.
 pub fn shortcuts() -> Vec<(String, &'static str)> {
     vec![
         ("Esc".to_string(), "Close topmost overlay / panel"),
@@ -24,7 +20,7 @@ pub fn shortcuts() -> Vec<(String, &'static str)> {
         ("Enter".to_string(), "Search: pick suggestion / run query"),
         (primary_shortcut("F"), "Focus the search box"),
         (primary_shortcut("+"), "Gallery grid: bigger"),
-        (primary_shortcut(minus_label()), "Gallery grid: smaller"),
+        (primary_shortcut("-"), "Gallery grid: smaller"),
         (primary_shortcut("0"), "Gallery grid: reset size"),
         ("F1".to_string(), "Toggle this help"),
         ("F3".to_string(), "Toggle the debug overlay"),

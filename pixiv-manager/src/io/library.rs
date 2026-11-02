@@ -55,7 +55,7 @@ impl BookmarkLibrary {
 
     /// Write atomically: temp file + rename. A crash can only leave a `.tmp`
     /// file behind, never a corrupt library at the final path.
-    pub fn save_atomic(&self, path: &Path) -> std::io::Result<()> {
+    pub fn save_atomic(&self, path: &Path) -> Result<(), crate::io::AtomicWriteError> {
         crate::io::save_json_atomic(self, path)
     }
 
@@ -127,7 +127,7 @@ impl DownloadQueue {
     }
 
     /// Write atomically.
-    pub fn save_atomic(&self, path: &Path) -> std::io::Result<()> {
+    pub fn save_atomic(&self, path: &Path) -> Result<(), crate::io::AtomicWriteError> {
         crate::io::save_json_atomic(self, path)
     }
 
@@ -328,9 +328,8 @@ mod tests {
         assert!(!tmp.path().join("bookmarks.tmp").exists());
     }
 
-    /// The bookmark library is rewritten on every bookmark/sync. Repeated
-    /// saves over an existing file are exactly what used to fail on Windows
-    /// (`remove_file` + `rename` left a window with no library at all).
+    /// The library is rewritten on every bookmark and sync, so replacing an
+    /// existing file repeatedly must keep working on every platform.
     #[test]
     fn library_survives_repeated_saves() {
         let tmp = tempfile::tempdir().unwrap();

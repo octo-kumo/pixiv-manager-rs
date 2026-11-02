@@ -1,11 +1,7 @@
-//! Atomic, compact, corrupt-safe on-disk cache for illust metadata (the
-//! detail `Illustration`) and comments.
+//! On-disk cache for illust metadata and comments (`meta/{id}.json`).
 //!
-//! Each illust gets its own `meta/{id}.json` file, written through the shared
-//! atomic writer in compact (non-pretty) form. A crash can only leave a
-//! `.tmp` file behind, never a half-written entry at the final path — and a
-//! corrupt/missing entry is treated as a miss, so the cache can never break
-//! the app.
+//! A corrupt or missing entry is treated as a miss, so the cache can never
+//! break the app.
 
 use pixivj_rs::model::{Comment, Illustration};
 use std::path::PathBuf;

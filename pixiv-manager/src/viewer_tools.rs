@@ -45,7 +45,7 @@ pub struct TransformKey {
     pub rotation: u8,
 }
 
-/// The persisted display transform of one tweet.
+/// Persisted display transform of one tweet.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct ViewTransform {
