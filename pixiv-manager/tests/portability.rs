@@ -98,3 +98,35 @@ fn long_nested_paths_round_trip() {
         serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
     assert_eq!(read["id"], 7);
 }
+
+/// A destination whose path is longer than `MAX_PATH`: the Win32 replacement
+/// wrappers must add the `\\?\` prefix themselves (unlike `std::fs`).
+#[cfg(windows)]
+#[test]
+fn atomic_writes_work_beyond_max_path() {
+    let root = tempfile::tempdir().unwrap();
+    let mut dir = root.path().to_path_buf();
+    for _ in 0..6 {
+        dir = dir.join("0123456789012345678901234567890123456789");
+    }
+    let path = dir.join("state.json");
+    assert!(
+        path.as_os_str().len() > 260,
+        "test path is only {} bytes",
+        path.as_os_str().len()
+    );
+
+    pixiv_manager::io::write_atomic(&path, b"first").unwrap();
+    assert_eq!(std::fs::read(&path).unwrap(), b"first");
+
+    // Second write replaces the existing long-path file.
+    pixiv_manager::io::write_atomic(&path, b"second").unwrap();
+    assert_eq!(std::fs::read(&path).unwrap(), b"second");
+
+    let leftovers = std::fs::read_dir(&dir)
+        .unwrap()
+        .flatten()
+        .filter(|entry| pixiv_manager::io::is_atomic_temp_file(&entry.file_name()))
+        .count();
+    assert_eq!(leftovers, 0, "temp files left behind");
+}

@@ -133,11 +133,60 @@ mod windows {
     /// failed ACL/attribute merge reports the same code.
     const ERROR_UNABLE_TO_MOVE_REPLACEMENT: i32 = 1176;
 
-    fn wide(path: &Path) -> Vec<u16> {
-        path.as_os_str()
+    /// Win32's file APIs, unlike `std::fs`, do not add the `\\?\` verbatim
+    /// prefix, so paths at or beyond `MAX_PATH` fail without it. Verbatim paths
+    /// also bypass normalization, so `.`/`..` are resolved and `/` converted
+    /// before the prefix goes on.
+    pub(super) fn wide(path: &Path) -> Vec<u16> {
+        const MAX_PATH_LIMIT: usize = 260;
+        let mut units: Vec<u16> = path.as_os_str().encode_wide().collect();
+        if units.len() >= MAX_PATH_LIMIT - 1 {
+            units = verbatim(path);
+        }
+        units.push(0);
+        units
+    }
+
+    fn verbatim(path: &Path) -> Vec<u16> {
+        let absolute = std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf());
+        let slash = u16::from(b'\\');
+        let units: Vec<u16> = lexical_normalize(&absolute)
+            .as_os_str()
             .encode_wide()
-            .chain(std::iter::once(0))
-            .collect()
+            .map(|c| if c == u16::from(b'/') { slash } else { c })
+            .collect();
+
+        let unc = units.len() >= 2 && units[0] == slash && units[1] == slash;
+        let mut prefixed: Vec<u16> = if unc {
+            r"\\?\UNC\".encode_utf16().collect()
+        } else {
+            r"\\?\".encode_utf16().collect()
+        };
+        if units.starts_with(&prefixed) {
+            return units;
+        }
+        prefixed.extend_from_slice(if unc { &units[2..] } else { &units[..] });
+        prefixed
+    }
+
+    fn lexical_normalize(path: &Path) -> std::path::PathBuf {
+        use std::path::Component;
+        let mut out = std::path::PathBuf::new();
+        for component in path.components() {
+            match component {
+                Component::CurDir => {}
+                Component::ParentDir => {
+                    if matches!(
+                        out.components().next_back(),
+                        Some(std::path::Component::Normal(_))
+                    ) {
+                        out.pop();
+                    }
+                }
+                other => out.push(other.as_os_str()),
+            }
+        }
+        out
     }
 
     fn is_transient(code: i32) -> bool {
@@ -244,6 +293,12 @@ mod windows {
         }
         ReplaceOutcome::SourceIntact(last)
     }
+}
+
+#[cfg(all(test, windows))]
+/// Test hook: build the wide path the Windows wrappers hand to Win32.
+fn windows_wide(path: &str) -> Vec<u16> {
+    windows::wide(std::path::Path::new(path))
 }
 
 #[cfg(test)]
@@ -391,6 +446,65 @@ mod tests {
         );
         assert!(tmp.exists());
         assert_eq!(std::fs::read(&dest).unwrap(), b"old");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn short_paths_are_passed_through() {
+        let wide = super::windows_wide(r"C:\tmp\state.json");
+        assert_eq!(wide[0], u16::from(b'C'));
+        assert_eq!(*wide.last().unwrap(), 0u16);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn long_paths_get_the_verbatim_prefix() {
+        let long = format!(r"C:\dir\{}", "a".repeat(300));
+        let wide = super::windows_wide(&long);
+        assert_eq!(
+            &wide[..4],
+            &[
+                u16::from(b'\\'),
+                u16::from(b'\\'),
+                u16::from(b'?'),
+                u16::from(b'\\')
+            ]
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn long_unc_paths_use_the_unc_form() {
+        let long = format!(r"\\server\share\{}", "a".repeat(300));
+        let wide = super::windows_wide(&long);
+        let expected: Vec<u16> = r"\\?\UNC\".encode_utf16().collect();
+        assert_eq!(&wide[..expected.len()], &expected[..]);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn verbatim_paths_are_not_prefixed_twice() {
+        let already = format!(r"\\?\C:\dir\{}", "a".repeat(300));
+        let wide = super::windows_wide(&already);
+        assert!(!wide.starts_with(&[
+            u16::from(b'\\'),
+            u16::from(b'\\'),
+            u16::from(b'?'),
+            u16::from(b'\\'),
+            u16::from(b'\\')
+        ]));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn dot_segments_are_resolved_before_prefixing() {
+        let long = format!(r"C:\dir\sub\..\{}", "a".repeat(300));
+        let wide = super::windows_wide(&long);
+        let dotdot = [u16::from(b'.'), u16::from(b'.')];
+        assert!(
+            !wide.windows(2).any(|pair| pair == dotdot),
+            "`..` must not survive into a verbatim path"
+        );
     }
 
     #[test]

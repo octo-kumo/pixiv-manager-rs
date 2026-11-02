@@ -198,10 +198,12 @@ fn create_temp(
     Err(last)
 }
 
-/// `config.toml.pixiv-manager-tmp-<pid>-<sequence>-<nonce>`.
+/// `config.toml.pixiv-manager-tmp-<nonce>-<sequence>`.
 ///
-/// The process nonce makes a name from a previous process with a recycled PID
-/// effectively impossible to collide with; `create_new` still arbitrates.
+/// Kept short: the destination may already be close to the platform's path
+/// limit. The process nonce separates processes (so a recycled pid cannot
+/// collide) and the sequence separates writes within one process; `create_new`
+/// still arbitrates.
 fn temp_name(dest: &Path) -> std::ffi::OsString {
     static SEQUENCE: AtomicU64 = AtomicU64::new(0);
     let mut name = dest
@@ -209,11 +211,10 @@ fn temp_name(dest: &Path) -> std::ffi::OsString {
         .map(|n| n.to_os_string())
         .unwrap_or_else(|| std::ffi::OsString::from("state"));
     name.push(format!(
-        "{}{}-{}-{:016x}",
+        "{}{:08x}-{:x}",
         TEMP_MARKER,
-        std::process::id(),
-        SEQUENCE.fetch_add(1, Ordering::Relaxed),
-        process_nonce()
+        process_nonce() as u32,
+        SEQUENCE.fetch_add(1, Ordering::Relaxed)
     ));
     name
 }
