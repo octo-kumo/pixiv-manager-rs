@@ -76,33 +76,33 @@ EOF
 
 echo "    ✓ ${APPS_DIR}/pixiv-manager.desktop"
 
-# ── 4. Icon (generate a simple SVG placeholder) ─────────────────────
+# ── 4. Icon ─────────────────────────────────────────────────────────
 echo "==> Installing icon..."
 mkdir -p "${ICONS_DIR}"
 
-# Generate a simple Pixiv-branded icon as SVG → PNG
-# Uses ImageMagick if available, otherwise creates an SVG icon
-if command -v convert &>/dev/null; then
-    cat > /tmp/pixiv-manager-icon.svg << 'SVGEOF'
+# The icon is a version-controlled build asset (assets/icons/), shared with the
+# Windows .ico and the macOS .icns. Installers must not synthesise a
+# placeholder: generated icons differ between machines and make the packaged
+# app look untrustworthy.
+ICON_SRC="${SCRIPT_DIR}/assets/icons/pixiv-manager.png"
+if [[ -f "${ICON_SRC}" ]]; then
+    cp "${ICON_SRC}" "${ICONS_DIR}/pixiv-manager.png"
+    echo "    ✓ ${ICONS_DIR}/pixiv-manager.png"
+elif command -v convert &>/dev/null; then
+    echo "    ⚠  assets/icons/pixiv-manager.png missing; falling back to a generated icon"
+    cat > "${SCRIPT_DIR}/.icon-fallback.svg" << 'SVGEOF'
 <svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
   <rect width="256" height="256" rx="48" fill="#0096fa"/>
   <text x="128" y="168" text-anchor="middle" font-family="Arial, sans-serif"
         font-size="140" font-weight="bold" fill="white">P</text>
 </svg>
 SVGEOF
-    convert -background none /tmp/pixiv-manager-icon.svg "${ICONS_DIR}/pixiv-manager.png" 2>/dev/null || true
-    rm -f /tmp/pixiv-manager-icon.svg
-    echo "    ✓ ${ICONS_DIR}/pixiv-manager.png (generated)"
+    convert -background none "${SCRIPT_DIR}/.icon-fallback.svg" \
+        "${ICONS_DIR}/pixiv-manager.png" 2>/dev/null || true
+    rm -f "${SCRIPT_DIR}/.icon-fallback.svg"
+    echo "    ✓ ${ICONS_DIR}/pixiv-manager.png (generated fallback)"
 else
-    # Fallback: copy SVG directly
-    cat > "${ICONS_DIR}/pixiv-manager.svg" << 'SVGEOF'
-<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
-  <rect width="256" height="256" rx="48" fill="#0096fa"/>
-  <text x="128" y="168" text-anchor="middle" font-family="Arial, sans-serif"
-        font-size="140" font-weight="bold" fill="white">P</text>
-</svg>
-SVGEOF
-    echo "    ✓ ${ICONS_DIR}/pixiv-manager.svg (SVG, install imagemagick for PNG)"
+    echo "    ⚠  assets/icons/pixiv-manager.png missing and imagemagick unavailable — no icon installed"
 fi
 
 # ── 5. Refresh KDE cache ────────────────────────────────────────────

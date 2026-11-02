@@ -1,9 +1,9 @@
 //! Atomic, compact, corrupt-safe on-disk cache for illust metadata (the
 //! detail `Illustration`) and comments.
 //!
-//! Each illust gets its own `meta/{id}.json` file, written atomically
-//! (temp file + rename) in compact (non-pretty) form. A crash can only leave
-//! a `.tmp` file behind, never a half-written entry at the final path — and a
+//! Each illust gets its own `meta/{id}.json` file, written through the shared
+//! atomic writer in compact (non-pretty) form. A crash can only leave a
+//! `.tmp` file behind, never a half-written entry at the final path — and a
 //! corrupt/missing entry is treated as a miss, so the cache can never break
 //! the app.
 
@@ -12,33 +12,16 @@ use std::path::PathBuf;
 
 /// Where per-illust metadata lives (alongside the library).
 fn meta_dir() -> PathBuf {
-    crate::io::library::library_dir().join("meta")
+    crate::io::paths::AppPaths::discover().meta_dir()
 }
 
 /// Write `value` as compact JSON to `path` atomically. Returns false on
 /// failure (the caller treats a miss as "not cached").
-fn write_json_atomic<T: serde::Serialize>(path: &PathBuf, value: &T) -> bool {
-    let Ok(content) = serde_json::to_string(value) else {
-        return false;
-    };
-    if let Some(parent) = path.parent() {
-        let _ = std::fs::create_dir_all(parent);
-    }
-    let tmp = path.with_extension("tmp");
-    if std::fs::write(&tmp, content).is_err() {
-        return false;
-    }
-    match std::fs::rename(&tmp, path) {
-        Ok(()) => true,
-        Err(_) if path.exists() => {
-            let _ = std::fs::remove_file(path);
-            std::fs::rename(&tmp, path).is_ok()
-        }
-        Err(_) => false,
-    }
+fn write_json_atomic<T: serde::Serialize>(path: &std::path::Path, value: &T) -> bool {
+    crate::io::save_json_compact_atomic(value, path).is_ok()
 }
 
-fn read_json_atomic<T: serde::de::DeserializeOwned>(path: &PathBuf) -> Option<T> {
+fn read_json_atomic<T: serde::de::DeserializeOwned>(path: &std::path::Path) -> Option<T> {
     let content = std::fs::read_to_string(path).ok()?;
     serde_json::from_str(&content).ok()
 }

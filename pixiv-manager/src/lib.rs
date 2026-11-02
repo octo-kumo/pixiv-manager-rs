@@ -11,6 +11,7 @@ pub mod image;
 pub mod io;
 pub mod media;
 pub mod onboarding_server;
+pub mod platform;
 pub mod profiling;
 pub mod source;
 pub mod theme;

@@ -19,6 +19,29 @@ pub fn set_test_config_dir() {
     });
 }
 
+/// Build a headless iced renderer without letting parallel tests crash.
+///
+/// `iced_test::simulator` constructs a wgpu instance, which enumerates Vulkan
+/// ICDs by `dlopen`ing every installed driver. The Vulkan loader is **not**
+/// safe against concurrent enumeration: with several simulator-based tests
+/// running in parallel inside one test binary, `loader_icd_scan` dereferences
+/// a null pointer and the process dies with SIGSEGV. That crash is unrelated
+/// to the code under test (it reproduces on the untouched baseline and
+/// disappears with `--test-threads=1`), but it made the suite look broken on
+/// every platform and would have done the same in Windows CI.
+///
+/// Only *initialization* is serialized — rendering afterwards is parallel-safe
+/// and stays fully concurrent.
+pub fn headless_iced<T>(build: impl FnOnce() -> T) -> T {
+    static INIT_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    let guard = INIT_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let built = build();
+    drop(guard);
+    built
+}
+
 /// A deterministic mock [`Illustration`] for benchmarks and property tests.
 pub fn mock_illust(id: u64) -> Illustration {
     Illustration {

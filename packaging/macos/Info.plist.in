@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Bundle metadata template. `scripts/package-macos.sh` substitutes @@VERSION@@
+  and @@BUNDLE_ID@@ so the bundle version always matches the release computed by
+  the pipeline. The identifier uses the project's GitHub namespace
+  (io.github.octo-kumo.*) — a domain this project actually controls, rather than
+  an invented reverse-DNS name.
+-->
+<plist version="1.0">
+<dict>
+    <key>CFBundleName</key>
+    <string>Pixiv Manager</string>
+    <key>CFBundleDisplayName</key>
+    <string>Pixiv Manager</string>
+    <key>CFBundleIdentifier</key>
+    <string>@@BUNDLE_ID@@</string>
+    <key>CFBundleVersion</key>
+    <string>@@VERSION@@</string>
+    <key>CFBundleShortVersionString</key>
+    <string>@@VERSION@@</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleExecutable</key>
+    <string>pixiv-manager</string>
+    <key>CFBundleIconFile</key>
+    <string>icon.icns</string>
+    <key>CFBundleInfoDictionaryVersion</key>
+    <string>6.0</string>
+    <key>LSMinimumSystemVersion</key>
+    <string>11.0</string>
+    <key>LSApplicationCategoryType</key>
+    <string>public.app-category.graphics-design</string>
+    <key>NSHighResolutionCapable</key>
+    <true/>
+    <key>NSSupportsAutomaticGraphicsSwitching</key>
+    <true/>
+    <key>NSHumanReadableCopyright</key>
+    <string>MIT licensed</string>
+</dict>
+</plist>

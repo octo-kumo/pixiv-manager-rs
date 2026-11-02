@@ -20,21 +20,89 @@ Twitter (`pixiv-manager/src/twitter`) and Bilibili
 (`pixiv-manager/src/bilibili`) that fold their posts into the same unified
 media model.
 
-## Build & run
+## Supported platforms
+
+| Platform | Status | Artifacts |
+|---|---|---|
+| Linux x86-64 | **Supported** — built, tested and used for development | `pixiv-manager-VERSION-x86_64-linux.tar.gz`, `./install.sh` |
+| Windows 10/11 x86-64 | **Supported** — built and tested natively (GUI + CLI, persistence, downloads, DPI, cookies) | `pixiv-manager-VERSION-x86_64-windows.zip` (portable), `PixivManager-VERSION-x86_64.msi` |
+| macOS 11+ (Apple Silicon + Intel) | **Experimental** — compiles in CI and macOS-specific code paths (⌘ shortcuts, `.app` bundle, Caches/Application Support locations) are implemented, but the GUI has not yet been runtime-tested on a Mac | `Pixiv-Manager-VERSION-universal.dmg`, `pixiv-manager-cli-VERSION-macos.tar.gz` |
+
+The application is one codebase on every platform: the same GUI, state machine,
+downloaders, provider clients and on-disk formats. OS differences are confined
+to `pixiv-manager/src/platform/` (memory/debug figures, the primary shortcut
+modifier, atomic file replacement) and `pixiv-manager/src/io/paths.rs`
+(directory layout). No reducers, widgets or provider code contain
+`cfg(target_os = …)` logic.
+
+## Installation
+
+### Linux
 
 ```bash
-cargo build --release
+./install.sh          # builds, installs to ~/.local/bin + KDE desktop entry
+```
+
+or unpack the release tarball anywhere and run the binaries from it.
+
+### Windows — portable ZIP
+
+Download `pixiv-manager-VERSION-x86_64-windows.zip`, extract it, and run
+`pixiv-manager.exe`. Nothing is installed and nothing is written outside your
+user profile. `pixiv-manager-cli.exe` is the command-line interface.
+
+### Windows — MSI
+
+`PixivManager-VERSION-x86_64.msi` installs per-user (no administrator prompt) to
+`%LOCALAPPDATA%\Programs\Pixiv Manager`, adds a Start-menu entry and an
+uninstall entry. It does not add the CLI to `PATH`, create services or startup
+entries, open firewall ports, or touch any browser data.
+
+### macOS
+
+Download `Pixiv-Manager-VERSION-universal.dmg`, open it and drag the app to
+`/Applications`. The CLI is a separate tarball. See
+[CROSS_PLATFORM_REPORT.md](CROSS_PLATFORM_REPORT.md) for the current signing and
+notarization status before relying on the macOS build.
+
+### Build from source
+
+Requires a stable Rust toolchain (pinned by `rust-toolchain`).
+
+```bash
+cargo build --release --locked
 ./target/release/pixiv-manager        # GUI
 ./target/release/pixiv-manager-cli    # CLI (Pixiv)
 ```
 
-Tests / lints (what CI runs):
+On Windows the rustls crypto provider (`aws-lc-sys`) needs CMake and NASM on
+`PATH`; both ship with the Visual Studio C++ build tools / `windows-latest`
+images. The release binaries are built with the MSVC target
+(`x86_64-pc-windows-msvc`).
+
+Tests / lints (exactly what `.github/workflows/ci.yml` runs):
 
 ```bash
-cargo fmt --check
-cargo clippy --workspace --all-targets -- -D warnings
-cargo test --workspace
+cargo fmt --check                          # Linux only (formatting is OS-neutral)
+cargo clippy --workspace -- -D warnings    # Linux only
+cargo test --workspace --locked            # Linux, Windows, macOS
+cargo build --release --workspace --locked # Linux, Windows, macOS
 ```
+
+`Cargo.lock` is committed: every platform and every released artifact resolves
+the same dependency graph.
+
+### Where files live
+
+| | Linux | Windows | macOS |
+|---|---|---|---|
+| `config.toml` (holds the refresh token) | `~/.config/pixiv-manager/` | `%APPDATA%\pixiv-manager\` | `~/Library/Application Support/pixiv-manager/` |
+| Bookmark library, download queue, colours, metadata, viewer transforms | `~/.local/share/pixiv-manager/library/` | `%LOCALAPPDATA%\pixiv-manager\library\` | `~/Library/Application Support/pixiv-manager/library/` |
+| Image cache (disposable) | `~/.cache/pixiv-manager/` | `%LOCALAPPDATA%\pixiv-manager\cache\` | `~/Library/Caches/pixiv-manager/` |
+
+The exact paths for your machine are shown in the app's log at startup and used
+as the placeholder hints in **Settings**; `PIXIV_MANAGER_CONFIG_DIR` overrides
+all of them (used by tests and portable installs).
 
 ## Twitter / X setup
 
@@ -43,16 +111,18 @@ internal GraphQL endpoints as x.com, authenticated with your browser cookies.
 
 1. Export your x.com cookies in Netscape `cookies.txt` format (any "export
    cookies" browser extension works; keep `auth_token`, `ct0` and `twid`).
-2. Either drop the file at `./twitter_cookies.txt` /
-   `~/.config/pixiv-manager/twitter_cookies.txt`, or point the app at it in
-   **Settings → Twitter cookies file** and press **Reload**.
+2. Either drop the file at `./twitter_cookies.txt` or next to `config.toml`
+   (the app's config directory — the exact path is the hint in **Settings →
+   Twitter cookies file**), or point the app at the file there and press
+   **Reload**.
 3. The Twitter tab now shows your home timeline (For You / Following, photo
    tweets only). The Bookmarks tab mixes Pixiv bookmarks with your liked
    tweets; liking a tweet in the app auto-downloads its photos, and the
    bookmark sync pulls likes into the local library.
 
 The cookies are only ever sent to `x.com` / `abs.twimg.com`; the file is
-gitignored and never read by tests.
+gitignored and never read by tests. The app never reads browser cookie
+databases or OS credential stores — you export the file yourself.
 
 ## Bilibili setup
 
@@ -60,9 +130,9 @@ Bilibili's web APIs are used directly with your browser cookies (`SESSDATA`,
 `bili_jct` and `DedeUserID`).
 
 1. Export your bilibili.com cookies in Netscape `cookies.txt` format.
-2. Either drop the file at `./bilibili_cookies.txt` /
-   `~/.config/pixiv-manager/bilibili_cookies.txt`, or set it in
-   **Settings → Bilibili cookies file** and press **Reload**.
+2. Either drop the file at `./bilibili_cookies.txt` or next to `config.toml`
+   (the exact path is the hint in **Settings → Bilibili cookies file**), or set
+   it there and press **Reload**.
 3. The Bilibili tab shows image dynamics (`DYNAMIC_TYPE_DRAW` / opus posts
    with pictures; videos and text-only posts are skipped) from either:
    - **Following** — everyone you follow (`t.bilibili.com`), or

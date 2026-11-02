@@ -5,7 +5,9 @@
 //! * [`memory`] — a tagged `#[global_allocator]` attributing allocation churn
 //!   to the component that was active when the allocation happened.
 //! * [`cpu`] — a `pprof-rs` sampling profiler whose capture can be triggered
-//!   over HTTP (agent-friendly) or directly.
+//!   over HTTP (agent-friendly) or directly. Unix only: elsewhere this is a
+//!   stub that reports the feature as unsupported (the rest of the profiling
+//!   feature — allocation tagging, timings, reports — stays portable).
 //! * [`report`] — the markdown/JSON report writer that answers the seven
 //!   profiling questions.
 //! * [`http`] — a tiny control server for the running GUI app so an agent can
@@ -15,7 +17,14 @@
 //! (e.g. [`timed_update`] just calls `update`), so call sites stay clean and
 //! normal builds pay zero cost.
 
-#[cfg(feature = "profiling")]
+// CPU sampling is Unix-only (pprof samples native stacks via perf/setitimer).
+// The rest of the profiling feature is portable, so the module keeps the same
+// API everywhere: the real sampler on Unix, an "unsupported" stub elsewhere.
+#[cfg(all(feature = "profiling", unix))]
+#[path = "cpu.rs"]
+pub mod cpu;
+#[cfg(all(feature = "profiling", not(unix)))]
+#[path = "cpu_stub.rs"]
 pub mod cpu;
 #[cfg(feature = "profiling")]
 pub mod http;

@@ -33,11 +33,12 @@ pub async fn build_client(
 }
 
 /// The default directory for downloaded illusts when no gallery path is set
-/// (`~/Pictures/pixiv`, falling back to `./pixiv`).
+/// (`Pictures/pixiv` on every platform, falling back to `./pixiv`).
+///
+/// The decision itself lives in the path layer so no module outside
+/// `io::paths` calls `dirs::*`.
 pub fn default_gallery_dir() -> PathBuf {
-    dirs::picture_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join("pixiv")
+    crate::io::paths::AppPaths::discover().default_gallery_dir()
 }
 
 /// The per-illust download directory: `{gallery}/{id}` for Pixiv and

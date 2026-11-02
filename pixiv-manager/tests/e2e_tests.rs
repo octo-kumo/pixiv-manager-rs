@@ -7,6 +7,7 @@ use pixiv_manager::app::message::Message;
 use pixiv_manager::app::state::{AppPhase, OnboardingStep, Tab};
 use pixiv_manager::app::update::update;
 use pixiv_manager::app::view::view;
+use pixiv_manager::test_util::headless_iced;
 use pixiv_manager::widgets::onboarding::onboarding_view;
 
 /// An API client with a fixed token (no network; requests fail fast).
@@ -117,13 +118,15 @@ fn test_onboarding_directory_selected_saves_path() {
         },
         ..Default::default()
     };
+    // A runtime-generated path: no test may depend on a Unix-only literal.
+    let gallery = std::env::temp_dir().join("gallery");
     let _ = update(
         &mut state,
-        Message::DirectorySelected(Some("/tmp/gallery".into())),
+        Message::DirectorySelected(Some(gallery.to_string_lossy().into_owned())),
     );
     assert_eq!(
         state.settings.gallery_path.as_deref(),
-        Some(std::path::Path::new("/tmp/gallery"))
+        Some(gallery.as_path())
     );
 }
 
@@ -868,7 +871,7 @@ fn test_onboarding_view_renders_starting() {
 
     let state = pixiv_manager::app::state::AppState::default();
     // state.onboarding.step is Starting by default
-    let mut ui = simulator(onboarding_view(&state));
+    let mut ui = headless_iced(|| simulator(onboarding_view(&state)));
     // Should render without panic
     assert!(
         ui.find("Pixiv Manager — Setup").is_ok() || ui.find("Starting setup server...").is_ok()
@@ -888,7 +891,7 @@ fn test_onboarding_view_renders_waiting_for_token() {
         ..Default::default()
     };
 
-    let mut ui = simulator(onboarding_view(&state));
+    let mut ui = headless_iced(|| simulator(onboarding_view(&state)));
     // Should show the URL or instructions
     assert!(ui.find("Log in with Pixiv").is_ok() || ui.find("Continue").is_ok());
 }
@@ -905,7 +908,7 @@ fn test_onboarding_view_renders_validating() {
         ..Default::default()
     };
 
-    let mut ui = simulator(onboarding_view(&state));
+    let mut ui = headless_iced(|| simulator(onboarding_view(&state)));
     // Should show validating/progress indicator
     assert!(
         ui.find("Verifying token with Pixiv...").is_ok()
@@ -925,7 +928,7 @@ fn test_onboarding_view_renders_select_directory() {
         ..Default::default()
     };
 
-    let mut ui = simulator(onboarding_view(&state));
+    let mut ui = headless_iced(|| simulator(onboarding_view(&state)));
     // Should show directory selection
     assert!(
         ui.find("Select where to store illustrations:").is_ok()
@@ -945,7 +948,7 @@ fn test_onboarding_view_renders_complete() {
         ..Default::default()
     };
 
-    let mut ui = simulator(onboarding_view(&state));
+    let mut ui = headless_iced(|| simulator(onboarding_view(&state)));
     // Should show completion
     assert!(
         ui.find("Setup complete! Loading...").is_ok() || ui.find("Pixiv Manager — Setup").is_ok()
@@ -963,7 +966,7 @@ fn test_main_view_renders_without_crash() {
         ..Default::default()
     };
     // No client — should still render (empty gallery)
-    let mut ui = simulator(view(&state));
+    let mut ui = headless_iced(|| simulator(view(&state)));
     // The tab bar must render, proving the view built without crashing.
     assert!(ui.find("Recommend").is_ok() || ui.find("Bookmarks").is_ok());
 }
@@ -976,7 +979,7 @@ fn test_config_roundtrip() {
 
     let settings = Settings {
         refresh_token: Some("test_token_abc".into()),
-        gallery_path: Some(std::path::PathBuf::from("/tmp/test_gallery")),
+        gallery_path: Some(std::env::temp_dir().join("test_gallery")),
         grid_size: 250,
         proxy: None,
         ..Default::default()

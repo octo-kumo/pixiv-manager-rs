@@ -47,11 +47,30 @@ base64 = "0.23"
 md-5 = "0.11"
 rand = "0.10"
 dirs = "7"
+# Cross-platform process/system memory figures for the F3 debug overlay
+# (`platform::memory_stats`). Only the `system` feature is needed — no disks,
+# networks, GPUs or users.
+sysinfo = { version = "0.40", default-features = false, features = ["system"] }
 toml = "1"
 log = "0.4"
 env_logger = "0.11"
 # Profiling only (feature = "profiling"): CPU sampling + flamegraph output.
+# Only Unix has `pprof`; the profiling feature stays usable on every platform
+# (see `src/profiling/cpu.rs`), but CPU sampling itself is Unix-only.
+[target.'cfg(unix)'.dependencies]
 pprof = { version = "0.15", features = ["flamegraph"], optional = true }
+
+# Atomic file replacement (platform::fs) needs the Win32 rename semantics:
+# `ReplaceFileW` / `MoveFileExW`, which have no portable equivalent.
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_Storage_FileSystem",
+] }
+
+[build-dependencies]
+# Windows executable resources (icon, VERSIONINFO, manifest) — see build.rs.
+winresource = { version = "0.1", default-features = false }
 
 [dev-dependencies]
 proptest = { workspace = true }

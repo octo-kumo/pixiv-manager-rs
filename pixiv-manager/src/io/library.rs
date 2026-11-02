@@ -234,37 +234,20 @@ pub struct DownloadJobState {
 // ── Shared paths ────────────────────────────────────────────────────────
 
 /// Directory holding the local library and job state.
+///
+/// The location is owned by [`crate::io::paths::AppPaths`]; test builds get a
+/// per-process temp directory (or whatever `PIXIV_MANAGER_CONFIG_DIR` says)
+/// so `cargo test` can never touch real bookmarks.
 pub fn library_dir() -> PathBuf {
-    // Tests set this to a temp dir so they never touch real user data.
-    if let Ok(dir) = std::env::var("PIXIV_MANAGER_CONFIG_DIR") {
-        if !dir.is_empty() {
-            return PathBuf::from(dir).join("library");
-        }
-    }
-    // Test builds (feature `test-util`) never touch the real library either;
-    // respect XDG_DATA_HOME redirects used by the CLI tests, else a temp dir.
-    #[cfg(feature = "test-util")]
-    if std::env::var("XDG_DATA_HOME")
-        .map(|d| !d.is_empty())
-        .unwrap_or(false)
-    {
-        // fall through to dirs::data_dir()
-    } else {
-        return std::env::temp_dir()
-            .join(format!("pixiv-manager-test-{}", std::process::id()))
-            .join("library");
-    }
-    dirs::data_dir()
-        .map(|d| d.join("pixiv-manager").join("library"))
-        .unwrap_or_else(|| std::env::temp_dir().join("pixiv-manager-library"))
+    crate::io::paths::AppPaths::discover().library_dir()
 }
 
 pub fn bookmarks_library_path() -> PathBuf {
-    library_dir().join("bookmarks.json")
+    crate::io::paths::AppPaths::discover().bookmarks_file()
 }
 
 pub fn download_queue_path() -> PathBuf {
-    library_dir().join("download_queue.json")
+    crate::io::paths::AppPaths::discover().download_queue_file()
 }
 
 #[cfg(test)]
@@ -343,6 +326,37 @@ mod tests {
         assert!(loaded.last_full_sync.is_some());
         // No stray temp files.
         assert!(!tmp.path().join("bookmarks.tmp").exists());
+    }
+
+    /// The bookmark library is rewritten on every bookmark/sync. Repeated
+    /// saves over an existing file are exactly what used to fail on Windows
+    /// (`remove_file` + `rename` left a window with no library at all).
+    #[test]
+    fn library_survives_repeated_saves() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("bookmarks.json");
+        for round in 1..=5u64 {
+            let mut lib = BookmarkLibrary::default();
+            lib.merge(vec![illust(round), illust(round + 100)]);
+            lib.save_atomic(&path).unwrap();
+            let loaded = BookmarkLibrary::load(&path);
+            assert_eq!(loaded.illusts.len(), 2, "round {round}");
+        }
+    }
+
+    /// Same for the persisted download queue.
+    #[test]
+    fn download_queue_survives_repeated_saves() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("download_queue.json");
+        for round in 1..=5u64 {
+            let mut q = DownloadQueue::default();
+            q.enqueue(round);
+            q.enqueue(round + 100);
+            q.save_atomic(&path).unwrap();
+            let loaded = DownloadQueue::load(&path).expect("queue readable");
+            assert_eq!(loaded.remaining.len(), 2, "round {round}");
+        }
     }
 
     #[test]

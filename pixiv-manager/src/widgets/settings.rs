@@ -11,6 +11,14 @@ use crate::app::state::{AppState, SettingsKey, ThemePreference};
 pub fn settings_screen(state: &AppState) -> iced::Element<'_, Message> {
     let mut rows: Vec<iced::Element<'_, Message>> = Vec::new();
 
+    // Example paths come from the path layer, so every hint is a real,
+    // platform-correct location instead of a hard-coded Linux config path
+    // string that is wrong on Windows and macOS.
+    let paths = crate::io::paths::AppPaths::discover();
+    let gallery_hint = format!("e.g. {}", crate::core::default_gallery_dir().display());
+    let twitter_cookie_hint = crate::io::paths::display(&paths.twitter_cookie_file());
+    let bilibili_cookie_hint = crate::io::paths::display(&paths.bilibili_cookie_file());
+
     // ── Theme ──────────────────────────────────────────────────────
     rows.push(setting_row(
         "Theme",
@@ -189,7 +197,7 @@ pub fn settings_screen(state: &AppState) -> iced::Element<'_, Message> {
     rows.push(setting_row(
         "Gallery directory",
         iced::widget::row![
-            crate::ui::text_input("e.g. ~/Pictures/Pixiv", &path_text)
+            crate::ui::text_input(&gallery_hint, &path_text)
                 .on_input(Message::GalleryPathInputChanged)
                 .size(13)
                 .width(iced::Length::FillPortion(4)),
@@ -234,7 +242,7 @@ pub fn settings_screen(state: &AppState) -> iced::Element<'_, Message> {
         "Twitter cookies file",
         iced::widget::column![
             iced::widget::row![
-                crate::ui::text_input("~/.config/pixiv-manager/twitter_cookies.txt", &cookie_text,)
+                crate::ui::text_input(&twitter_cookie_hint, &cookie_text)
                     .on_input(Message::TwitterCookiePathChanged)
                     .size(13)
                     .width(iced::Length::FillPortion(4)),
@@ -311,13 +319,10 @@ pub fn settings_screen(state: &AppState) -> iced::Element<'_, Message> {
         "Bilibili cookies file",
         iced::widget::column![
             iced::widget::row![
-                crate::ui::text_input(
-                    "~/.config/pixiv-manager/bilibili_cookies.txt",
-                    &bili_cookie_text,
-                )
-                .on_input(Message::BilibiliCookiePathChanged)
-                .size(13)
-                .width(iced::Length::FillPortion(4)),
+                crate::ui::text_input(&bilibili_cookie_hint, &bili_cookie_text)
+                    .on_input(Message::BilibiliCookiePathChanged)
+                    .size(13)
+                    .width(iced::Length::FillPortion(4)),
                 crate::ui::button(iced::widget::text("Reload").size(12))
                     .on_press(Message::ReloadBilibiliCookies)
                     .padding(iced::Padding::from([4, 10])),

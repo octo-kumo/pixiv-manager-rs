@@ -55,6 +55,15 @@ pub fn boot() -> (AppState, iced::Task<Message>) {
     // Restrict any pre-existing config to owner-only (it holds the token).
     fix_config_permissions();
 
+    // One-time: image bytes used to live in the *data* directory. They now
+    // belong in the OS cache directory, so move the old files across (best
+    // effort — this is re-downloadable data, never user data).
+    if let Some(legacy) = crate::io::paths::legacy_image_cache_dir() {
+        if legacy.is_dir() {
+            crate::image::cache::migrate_legacy_cache(&legacy, &cache_dir());
+        }
+    }
+
     state.view_transforms = crate::viewer_tools::load();
 
     // Load the centralized color map (palettes for the sRGB/Hue sorts).

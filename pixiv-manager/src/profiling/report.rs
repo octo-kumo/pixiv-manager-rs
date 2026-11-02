@@ -124,7 +124,7 @@ fn phase_stats(samples: &[super::PhaseSample]) -> Vec<(String, Stats)> {
 fn write_markdown(
     snapshot: &Snapshot,
     mem: &MemoryReport,
-    pprof: Option<&pprof::Report>,
+    pprof: Option<&super::cpu::Report>,
 ) -> String {
     let mut md = String::new();
     md.push_str("# Pixiv Manager — Profiling Report\n\n");
@@ -639,7 +639,7 @@ pub fn write(snapshot: &Snapshot, mem: &MemoryReport, dir: &Path) -> (String, St
 pub fn write_with_cpu(
     snapshot: &Snapshot,
     mem: &MemoryReport,
-    report: &pprof::Report,
+    report: &super::cpu::Report,
     dir: &Path,
 ) -> (String, String) {
     let md = write_markdown(snapshot, mem, Some(report));
@@ -686,13 +686,13 @@ mod tests {
         );
         tracing::record_file(
             FileOp::Write,
-            "/tmp/lib.json".into(),
+            std::env::temp_dir().join("lib.json").display().to_string(),
             500,
             Duration::from_millis(2),
         );
         tracing::record_file(
             FileOp::Write,
-            "/tmp/lib.json".into(),
+            std::env::temp_dir().join("lib.json").display().to_string(),
             500,
             Duration::from_millis(1),
         );

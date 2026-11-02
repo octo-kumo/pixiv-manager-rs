@@ -89,7 +89,7 @@ impl ViewTransform {
 // ── Persistence ────────────────────────────────────────────────────────
 
 fn transforms_path() -> PathBuf {
-    crate::io::library::library_dir().join("viewer_transforms.json")
+    crate::io::paths::AppPaths::discover().viewer_transforms_file()
 }
 
 /// Load the saved transforms (missing/corrupt → empty).
@@ -101,25 +101,17 @@ pub fn load() -> HashMap<u64, ViewTransform> {
 }
 
 /// Persist the transforms (identity entries are dropped). Best-effort.
+///
+/// Goes through the shared atomic writer so repeated saves work on Windows
+/// (the old `write tmp; rename` sequence failed there whenever the
+/// destination already existed).
 pub fn save(transforms: &HashMap<u64, ViewTransform>) {
-    let path = transforms_path();
-    if let Some(dir) = path.parent() {
-        let _ = std::fs::create_dir_all(dir);
-    }
     let kept: BTreeMap<&u64, &ViewTransform> = transforms
         .iter()
         .filter(|(_, t)| !t.is_identity())
         .collect();
-    match serde_json::to_string(&kept) {
-        Ok(json) => {
-            let tmp = path.with_extension("json.tmp");
-            if std::fs::write(&tmp, json).is_ok() {
-                if let Err(e) = std::fs::rename(&tmp, &path) {
-                    log::warn!("[viewer_tools] save failed: {e}");
-                }
-            }
-        }
-        Err(e) => log::warn!("[viewer_tools] serialize failed: {e}"),
+    if let Err(e) = crate::io::save_json_compact_atomic(&kept, &transforms_path()) {
+        log::warn!("[viewer_tools] save failed: {e}");
     }
 }
 
@@ -377,6 +369,28 @@ mod tests {
             Rgba([(x * 3 % 256) as u8, (y * 5 % 256) as u8, 200, 255])
         });
         assert_eq!(detect_split(&[a, b]), None);
+    }
+
+    /// Viewer transforms are saved every time a rotation/merge changes, so the
+    /// file is rewritten over and over. Repeated overwrites are the case that
+    /// broke on Windows (the old writer failed once the destination existed).
+    #[test]
+    fn transforms_survive_repeated_saves() {
+        crate::test_util::set_test_config_dir();
+
+        for round in 1..=5usize {
+            let mut transforms = HashMap::new();
+            let mut t = ViewTransform::default();
+            t.rotate(0, 1);
+            transforms.insert(round as u64, t);
+            save(&transforms);
+
+            let loaded = load();
+            let entry = loaded
+                .get(&(round as u64))
+                .unwrap_or_else(|| panic!("transform for round {round} missing"));
+            assert_eq!(entry.rotation(0), 1, "round {round}");
+        }
     }
 
     #[test]

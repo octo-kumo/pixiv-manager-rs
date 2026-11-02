@@ -1,0 +1,92 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  WiX v4/v5 source for the Pixiv Manager MSI.
+
+  Design constraints (see the cross-platform spec, phase 11 and 17):
+  * per-user install (%LOCALAPPDATA%\Programs\Pixiv Manager): no administrator
+    prompt, no Program Files, no machine-wide changes;
+  * Start-menu shortcut + icon + uninstall entry, nothing else — no services,
+    no startup entries, no PATH modification, no firewall rules;
+  * the CLI is installed next to the GUI but NOT added to PATH (opt-in later,
+    deliberately omitted for the first release).
+
+  Build (version comes from the release pipeline):
+    wix build packaging/windows/PixivManager.wxs ^
+        -d Version=1.2.3 ^
+        -d BinDir=target\release ^
+        -o dist\PixivManager-1.2.3-x86_64.msi
+-->
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Package
+      Name="Pixiv Manager"
+      Manufacturer="Pixiv Manager contributors"
+      Version="$(var.Version)"
+      UpgradeCode="6f2a7c1e-9b4d-4c8a-a0e3-5d7f21b4c9a0"
+      Scope="perUser"
+      Compressed="yes"
+      InstallerVersion="500">
+
+    <SummaryInformation
+        Description="Pixiv Manager — browse, download and manage Pixiv illustrations"
+        Manufacturer="Pixiv Manager contributors" />
+
+    <!-- One rolling upgrade path: a newer MSI replaces the older install. -->
+    <MajorUpgrade
+        DowngradeErrorMessage="A newer version of Pixiv Manager is already installed."
+        Schedule="afterInstallValidate" />
+
+    <MediaTemplate EmbedCab="yes" />
+
+    <Icon Id="PixivManagerIcon" SourceFile="assets\icons\pixiv-manager.ico" />
+    <Property Id="ARPPRODUCTICON" Value="PixivManagerIcon" />
+    <Property Id="ARPNOMODIFY" Value="1" />
+    <!-- Populate "Install location" in Apps & features once the directory is
+         resolved (a plain property reference is illegal here). -->
+    <SetProperty Id="ARPINSTALLLOCATION" Value="[INSTALLFOLDER]" After="CostFinalize" Sequence="execute" />
+
+    <!-- %LOCALAPPDATA%\Programs\Pixiv Manager: the conventional per-user
+         install location, so a per-user install never needs elevation. -->
+    <StandardDirectory Id="LocalAppDataFolder">
+      <Directory Id="ProgramsFolder" Name="Programs">
+        <Directory Id="INSTALLFOLDER" Name="Pixiv Manager" />
+      </Directory>
+    </StandardDirectory>
+
+    <StandardDirectory Id="ProgramMenuFolder">
+      <Directory Id="AppMenuFolder" Name="Pixiv Manager" />
+    </StandardDirectory>
+
+    <Feature Id="MainFeature" Title="Pixiv Manager" Level="1">
+      <ComponentGroupRef Id="ApplicationFiles" />
+    </Feature>
+  </Package>
+
+  <Fragment>
+    <ComponentGroup Id="ApplicationFiles" Directory="INSTALLFOLDER">
+      <!-- KeyPath lives on the GUI executable. The Start-menu shortcut and the
+           folder it lives in are authored here, so uninstall removes both
+           without needing an extra registry value. -->
+      <Component Id="PathGui">
+        <File Id="GuiExe" Source="$(var.BinDir)\pixiv-manager.exe" KeyPath="yes">
+          <Shortcut Id="StartMenuShortcut"
+                    Directory="AppMenuFolder"
+                    Name="Pixiv Manager"
+                    Description="Browse, download and manage Pixiv illustrations"
+                    WorkingDirectory="INSTALLFOLDER"
+                    Icon="PixivManagerIcon" />
+        </File>
+        <!-- Remove the Start-menu folder on uninstall (the shortcut and the
+             folder itself would otherwise be left behind). -->
+        <RemoveFolder Id="RemoveAppMenuFolder" Directory="AppMenuFolder" On="uninstall" />
+      </Component>
+
+      <Component Id="PathCli">
+        <File Id="CliExe" Source="$(var.BinDir)\pixiv-manager-cli.exe" KeyPath="yes" />
+      </Component>
+
+      <Component Id="PathDocs">
+        <File Id="Readme" Source="README.md" KeyPath="yes" />
+      </Component>
+    </ComponentGroup>
+  </Fragment>
+</Wix>

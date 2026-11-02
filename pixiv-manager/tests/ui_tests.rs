@@ -10,6 +10,7 @@ use pixiv_manager::app::state::{
 };
 use pixiv_manager::app::update::update;
 use pixiv_manager::app::view::view;
+use pixiv_manager::test_util::headless_iced;
 use pixiv_manager::widgets::onboarding::onboarding_view;
 use pixivj_rs::model::*;
 
@@ -118,7 +119,7 @@ fn simulator_with_size<'a>(
     element: impl Into<iced::Element<'a, Message, iced::Theme, iced::Renderer>> + 'a,
 ) -> iced_test::Simulator<'a, Message, iced::Theme, iced::Renderer> {
     use iced_test::simulator;
-    let mut sim = simulator(element);
+    let mut sim = headless_iced(|| simulator(element));
     sim.point_at(iced::Point::new(800.0, 450.0));
     sim
 }
@@ -1497,7 +1498,7 @@ fn settings_global_reset_keeps_token() {
     state.settings.parallax_scroll = false;
     state.settings.auto_preload = 0;
     state.settings.download_concurrency = 8;
-    state.settings.gallery_path = Some("/tmp/pix".into());
+    state.settings.gallery_path = Some(std::env::temp_dir().join("pix"));
 
     let _ = pixiv_manager::app::update::update(&mut state, Message::ResetAllSettings);
     assert_eq!(
@@ -1617,11 +1618,13 @@ fn gallery_scrollbar_is_drawn_over_the_tiles() {
     state.window_size = (1024.0, 768.0);
     big_illusts(200, &mut state);
 
-    let mut sim = iced_test::Simulator::with_size(
-        iced_test::core::Settings::default(),
-        iced::Size::new(1024.0, 768.0),
-        view(&state),
-    );
+    let mut sim = headless_iced(|| {
+        iced_test::Simulator::with_size(
+            iced_test::core::Settings::default(),
+            iced::Size::new(1024.0, 768.0),
+            view(&state),
+        )
+    });
     sim.point_at(iced::Point::new(512.0, 450.0));
     let statuses = sim.simulate([iced::Event::Mouse(iced::mouse::Event::WheelScrolled {
         delta: iced::mouse::ScrollDelta::Lines { x: 0.0, y: -3.0 },

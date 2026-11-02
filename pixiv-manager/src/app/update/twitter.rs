@@ -43,13 +43,10 @@ pub(super) fn resolve_cookie_path(state: &AppState) -> Option<std::path::PathBuf
     }
     #[cfg(not(feature = "test-util"))]
     {
-        if let Some(config) = crate::io::config::config_path() {
-            if let Some(dir) = config.parent() {
-                let candidate = dir.join("twitter_cookies.txt");
-                if candidate.is_file() {
-                    return Some(candidate);
-                }
-            }
+        // Conventional location from the path layer (config dir on every OS).
+        let candidate = crate::io::paths::AppPaths::discover().twitter_cookie_file();
+        if candidate.is_file() {
+            return Some(candidate);
         }
         let cwd = std::path::PathBuf::from("twitter_cookies.txt");
         if cwd.is_file() {
@@ -75,13 +72,9 @@ fn resolve_graphql_path() -> Option<std::path::PathBuf> {
     }
     #[cfg(not(feature = "test-util"))]
     {
-        if let Some(config) = crate::io::config::config_path() {
-            if let Some(dir) = config.parent() {
-                let candidate = dir.join("twitter_graphql.json");
-                if candidate.is_file() {
-                    return Some(candidate);
-                }
-            }
+        let candidate = crate::io::paths::AppPaths::discover().twitter_graphql_file();
+        if candidate.is_file() {
+            return Some(candidate);
         }
         let cwd = std::path::PathBuf::from("twitter_graphql.json");
         if cwd.is_file() {

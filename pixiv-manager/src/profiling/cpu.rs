@@ -8,6 +8,10 @@
 use std::collections::BTreeMap;
 use std::sync::Mutex;
 
+/// The CPU capture type, re-exported so the rest of the profiling module never
+/// has to name `pprof` (which is only a dependency on Unix).
+pub type Report = pprof::Report;
+
 static GUARD: Mutex<Option<pprof::ProfilerGuard<'static>>> = Mutex::new(None);
 static FREQUENCY: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(100);
 
@@ -29,7 +33,7 @@ pub fn start() -> Result<(), String> {
 
 /// Stop sampling and return the report (symbols resolved), if a capture was
 /// running.
-pub fn stop() -> Option<pprof::Report> {
+pub fn stop() -> Option<Report> {
     let mut guard = GUARD.lock().unwrap();
     guard
         .take()
@@ -38,7 +42,7 @@ pub fn stop() -> Option<pprof::Report> {
 
 /// Write a flamegraph SVG to `writer`.
 pub fn write_flamegraph(
-    report: &pprof::Report,
+    report: &Report,
     writer: &mut dyn std::io::Write,
 ) -> Result<(), pprof::Error> {
     report.flamegraph(writer)
@@ -79,7 +83,7 @@ fn is_idle_shim(name: &str) -> bool {
 
 /// Build a text table of the top functions by **self** time, with source
 /// locations. `frequency_hz` converts sample counts to approximate seconds.
-pub fn hotspots(report: &pprof::Report, frequency_hz: i32) -> Vec<Hotspot> {
+pub fn hotspots(report: &Report, frequency_hz: i32) -> Vec<Hotspot> {
     let mut self_map: BTreeMap<(String, String), i64> = BTreeMap::new();
     let mut total_map: BTreeMap<(String, String), i64> = BTreeMap::new();
 
@@ -129,7 +133,7 @@ pub fn hotspots(report: &pprof::Report, frequency_hz: i32) -> Vec<Hotspot> {
 }
 
 /// Render the hotspots table as markdown.
-pub fn hotspots_markdown(report: &pprof::Report, frequency_hz: i32) -> String {
+pub fn hotspots_markdown(report: &Report, frequency_hz: i32) -> String {
     let mut md = String::from("| # | self % | self (s) | total (s) | function | location |\n");
     md.push_str("|---|--------|----------|-----------|----------|----------|\n");
     let total_samples: i64 = report

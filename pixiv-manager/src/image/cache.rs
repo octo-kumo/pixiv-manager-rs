@@ -166,7 +166,7 @@ impl ImageCache {
                 let path = entry.path();
                 let name = entry.file_name();
                 let name = name.to_string_lossy();
-                if !name.ends_with(".tmp") {
+                if !name.contains(".tmp") {
                     let _ = std::fs::remove_file(path);
                 }
             }
@@ -174,40 +174,67 @@ impl ImageCache {
     }
 }
 
-/// Write `bytes` to `dir/key` atomically: temp file + rename. A crash can
-/// only leave a `.tmp` file behind (cleaned on next startup), never a
-/// half-written entry at the final path.
+/// Write `bytes` to `dir/key` through the shared atomic writer. A crash can
+/// only leave a `.tmp` file behind, never a half-written entry at the final
+/// path.
 fn write_atomic(dir: &std::path::Path, key: &str, bytes: &[u8]) {
     let final_path = dir.join(key);
-    let tmp_path = dir.join(format!("{}.tmp", key));
-    #[cfg(feature = "profiling")]
-    let start = std::time::Instant::now();
-    if let Err(e) = std::fs::write(&tmp_path, bytes) {
-        log::warn!("[image_cache] disk write failed: {}", e);
+    if let Err(e) = crate::io::write_atomic(&final_path, bytes) {
+        log::warn!("[image_cache] disk write failed: {e}");
+    }
+}
+
+/// Move a pre-`AppPaths` disk cache (`<data>/pixiv-manager/cache`) into the OS
+/// cache directory, best effort.
+///
+/// The image cache is disposable, so this is a courtesy, not a migration: a
+/// failure only costs re-downloads. Files that already exist in the new
+/// location win; the legacy directory is removed once it is empty so the
+/// user's data directory does not keep growing.
+pub fn migrate_legacy_cache(legacy: &std::path::Path, current: &std::path::Path) {
+    if !legacy.is_dir() || legacy == current {
         return;
     }
-    #[cfg(feature = "profiling")]
-    crate::profiling::tracing::record_file(
-        crate::profiling::tracing::FileOp::Write,
-        final_path.display().to_string(),
-        bytes.len(),
-        start.elapsed(),
-    );
-    match std::fs::rename(&tmp_path, &final_path) {
-        Ok(()) => {}
-        // Windows refuses to overwrite an existing file — replace it.
-        Err(_) if final_path.exists() => {
-            let _ = std::fs::remove_file(&final_path);
-            if let Err(e) = std::fs::rename(&tmp_path, &final_path) {
-                log::warn!("[image_cache] disk rename failed: {}", e);
-                let _ = std::fs::remove_file(&tmp_path);
-            }
+    let _ = std::fs::create_dir_all(current);
+    let Ok(entries) = std::fs::read_dir(legacy) else {
+        return;
+    };
+    let (mut moved, mut failed) = (0usize, 0usize);
+    for entry in entries.flatten() {
+        let from = entry.path();
+        if !from.is_file() {
+            continue;
         }
-        Err(e) => {
-            log::warn!("[image_cache] disk rename failed: {}", e);
-            let _ = std::fs::remove_file(&tmp_path);
+        let Some(name) = from.file_name() else {
+            continue;
+        };
+        let to = current.join(name);
+        if to.exists() {
+            // Already present in the new location: the legacy copy is stale.
+            let _ = std::fs::remove_file(&from);
+            continue;
+        }
+        match std::fs::rename(&from, &to) {
+            Ok(()) => moved += 1,
+            Err(_) => match std::fs::copy(&from, &to) {
+                Ok(_) => {
+                    let _ = std::fs::remove_file(&from);
+                    moved += 1;
+                }
+                Err(_) => failed += 1,
+            },
         }
     }
+    if failed == 0 {
+        // Only drop the directory when everything moved; otherwise leave it
+        // for the next start (or the user) rather than deleting bytes.
+        let _ = std::fs::remove_dir(legacy);
+    }
+    log::info!(
+        "[image_cache] migrated {moved} cached image(s) from {} to {}",
+        legacy.display(),
+        current.display()
+    );
 }
 
 /// Cheap magic-byte check for the image formats Pixiv serves (JPEG/PNG/GIF/WebP).

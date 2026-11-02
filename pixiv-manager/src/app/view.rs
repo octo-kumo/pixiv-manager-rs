@@ -276,14 +276,16 @@ pub fn view(state: &AppState) -> iced::Element<'_, Message> {
 
     // ── Debug overlay (F3): floating, half-transparent panel over the gallery ──
     if state.debug_overlay && !state.viewer.open && !state.artist.open {
+        // One probe per frame; `None` figures render as "N/A".
+        let memory = crate::platform::memory_stats();
         let data = crate::widgets::debug_overlay::DebugData {
-            os: std::env::consts::OS.to_string(),
-            arch: std::env::consts::ARCH.to_string(),
+            os: crate::platform::os_name().to_string(),
+            arch: crate::platform::arch().to_string(),
             cores: std::thread::available_parallelism()
                 .map(|n| n.get())
                 .unwrap_or(1),
-            mem_used_mb: memory_used_mb(),
-            mem_total_mb: memory_total_mb(),
+            mem_used_mb: memory.process_used_mb,
+            mem_total_mb: memory.system_total_mb,
             gallery_items: illusts.len(),
             thumbnails: state.images.thumbnail_handles.len(),
             thumb_attempts: state
@@ -839,44 +841,6 @@ fn format_speed(bytes_per_sec: f64) -> String {
         unit += 1;
     }
     format!("{:.1} {}", value, UNITS[unit])
-}
-
-/// Current process memory usage in MB (best effort).
-fn memory_used_mb() -> f64 {
-    #[cfg(target_os = "linux")]
-    {
-        if let Ok(content) = std::fs::read_to_string("/proc/self/statm") {
-            let mut parts = content.split_whitespace();
-            if let (Some(total), Some(resident)) = (parts.next(), parts.next()) {
-                if let (Ok(_total), Ok(resident)) = (total.parse::<f64>(), resident.parse::<f64>())
-                {
-                    let page = 4096.0;
-                    return resident * page / (1024.0 * 1024.0);
-                }
-                let _ = total;
-            }
-        }
-    }
-    0.0
-}
-
-/// Total system memory in MB (best effort).
-fn memory_total_mb() -> f64 {
-    #[cfg(target_os = "linux")]
-    {
-        if let Ok(content) = std::fs::read_to_string("/proc/meminfo") {
-            for line in content.lines() {
-                if let Some(rest) = line.strip_prefix("MemTotal:") {
-                    if let Some(kb) = rest.trim().strip_suffix("kB") {
-                        if let Ok(kb) = kb.trim().parse::<f64>() {
-                            return kb / 1024.0;
-                        }
-                    }
-                }
-            }
-        }
-    }
-    0.0
 }
 
 /// An icon-only button that cycles the dark/light preference:

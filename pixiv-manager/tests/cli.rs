@@ -1,18 +1,45 @@
+//! CLI integration tests.
+//!
+//! Every test runs the real `pixiv-manager-cli` binary in an isolated config
+//! directory. Isolation is passed to the *subprocess* through
+//! `PIXIV_MANAGER_CONFIG_DIR`, so this test process never mutates its own
+//! environment. That replaces the old scheme, which set `XDG_CONFIG_HOME`
+//! (Linux-only) globally and therefore needed a process-wide mutex to stop
+//! parallel tests from racing each other's temp directories.
+
 use assert_cmd::Command;
 use predicates::prelude::*;
 
-/// Tests that touch `XDG_CONFIG_HOME` must run one at a time: the env var is
-/// process-global, so parallel tests would race each other's temp dirs.
-static CONFIG_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+/// One isolated CLI world: a private config directory plus a helper that
+/// spawns the CLI pointed at it.
+struct Isolated {
+    dir: tempfile::TempDir,
+}
 
-fn cli_bin() -> Command {
-    Command::cargo_bin("pixiv-manager-cli").unwrap()
+impl Isolated {
+    fn new() -> Self {
+        Self {
+            dir: tempfile::tempdir().expect("temp config dir"),
+        }
+    }
+
+    /// A CLI invocation whose config/library/cache all live in the temp dir.
+    fn cli(&self) -> Command {
+        let mut command = Command::cargo_bin("pixiv-manager-cli").expect("cli binary");
+        command.env("PIXIV_MANAGER_CONFIG_DIR", self.dir.path());
+        command
+    }
+
+    /// `<config dir>/config.toml` — where `PIXIV_MANAGER_CONFIG_DIR` puts it.
+    fn config_file(&self) -> std::path::PathBuf {
+        self.dir.path().join("config.toml")
+    }
 }
 
 #[test]
 fn test_help() {
-    let _guard = CONFIG_ENV_LOCK.lock().unwrap();
-    cli_bin()
+    let cli = Isolated::new();
+    cli.cli()
         .arg("--help")
         .assert()
         .success()
@@ -27,8 +54,8 @@ fn test_help() {
 
 #[test]
 fn test_version() {
-    let _guard = CONFIG_ENV_LOCK.lock().unwrap();
-    cli_bin()
+    let cli = Isolated::new();
+    cli.cli()
         .arg("--version")
         .assert()
         .success()
@@ -37,8 +64,8 @@ fn test_version() {
 
 #[test]
 fn test_no_args_shows_error() {
-    let _guard = CONFIG_ENV_LOCK.lock().unwrap();
-    cli_bin()
+    let cli = Isolated::new();
+    cli.cli()
         .assert()
         .failure()
         .stderr(predicate::str::contains("No command specified"));
@@ -46,20 +73,14 @@ fn test_no_args_shows_error() {
 
 #[test]
 fn test_config_show_no_config() {
-    let _guard = CONFIG_ENV_LOCK.lock().unwrap();
-    let dir = tempfile::tempdir().unwrap();
-    std::env::set_var("XDG_CONFIG_HOME", dir.path());
-
-    cli_bin().arg("config").arg("--show").assert().success();
+    let cli = Isolated::new();
+    cli.cli().arg("config").arg("--show").assert().success();
 }
 
 #[test]
 fn test_config_set_invalid_format() {
-    let _guard = CONFIG_ENV_LOCK.lock().unwrap();
-    let dir = tempfile::tempdir().unwrap();
-    std::env::set_var("XDG_CONFIG_HOME", dir.path());
-
-    cli_bin()
+    let cli = Isolated::new();
+    cli.cli()
         .arg("config")
         .arg("--set")
         .arg("noequals")
@@ -70,11 +91,8 @@ fn test_config_set_invalid_format() {
 
 #[test]
 fn test_config_set_unknown_key() {
-    let _guard = CONFIG_ENV_LOCK.lock().unwrap();
-    let dir = tempfile::tempdir().unwrap();
-    std::env::set_var("XDG_CONFIG_HOME", dir.path());
-
-    cli_bin()
+    let cli = Isolated::new();
+    cli.cli()
         .arg("config")
         .arg("--set")
         .arg("unknown_key=value")
@@ -85,11 +103,8 @@ fn test_config_set_unknown_key() {
 
 #[test]
 fn test_config_set_grid_size_invalid() {
-    let _guard = CONFIG_ENV_LOCK.lock().unwrap();
-    let dir = tempfile::tempdir().unwrap();
-    std::env::set_var("XDG_CONFIG_HOME", dir.path());
-
-    cli_bin()
+    let cli = Isolated::new();
+    cli.cli()
         .arg("config")
         .arg("--set")
         .arg("grid_size=abc")
@@ -100,11 +115,8 @@ fn test_config_set_grid_size_invalid() {
 
 #[test]
 fn test_config_set_grid_size_zero() {
-    let _guard = CONFIG_ENV_LOCK.lock().unwrap();
-    let dir = tempfile::tempdir().unwrap();
-    std::env::set_var("XDG_CONFIG_HOME", dir.path());
-
-    cli_bin()
+    let cli = Isolated::new();
+    cli.cli()
         .arg("config")
         .arg("--set")
         .arg("grid_size=0")
@@ -115,11 +127,8 @@ fn test_config_set_grid_size_zero() {
 
 #[test]
 fn test_config_set_valid() {
-    let _guard = CONFIG_ENV_LOCK.lock().unwrap();
-    let dir = tempfile::tempdir().unwrap();
-    std::env::set_var("XDG_CONFIG_HOME", dir.path());
-
-    cli_bin()
+    let cli = Isolated::new();
+    cli.cli()
         .arg("config")
         .arg("--set")
         .arg("grid_size=300")
@@ -130,20 +139,15 @@ fn test_config_set_valid() {
 
 #[test]
 fn test_config_roundtrip() {
-    let _guard = CONFIG_ENV_LOCK.lock().unwrap();
-    let dir = tempfile::tempdir().unwrap();
-    std::env::set_var("XDG_CONFIG_HOME", dir.path());
-
-    // Set a value
-    cli_bin()
+    let cli = Isolated::new();
+    cli.cli()
         .arg("config")
         .arg("--set")
         .arg("grid_size=250")
         .assert()
         .success();
 
-    // Show and verify it's there
-    cli_bin()
+    cli.cli()
         .arg("config")
         .arg("--show")
         .assert()
@@ -151,13 +155,27 @@ fn test_config_roundtrip() {
         .stdout(predicate::str::contains("grid_size"));
 }
 
+/// The CLI must write exactly one file into the isolated directory and never
+/// fall back to the real user configuration.
+#[test]
+fn test_config_is_written_inside_the_isolated_dir() {
+    let cli = Isolated::new();
+    cli.cli()
+        .arg("config")
+        .arg("--set")
+        .arg("grid_size=260")
+        .assert()
+        .success();
+    let path = cli.config_file();
+    assert!(path.is_file(), "expected {} to exist", path.display());
+    let content = std::fs::read_to_string(&path).expect("config readable");
+    assert!(content.contains("260"), "config content: {content}");
+}
+
 #[test]
 fn test_search_no_token() {
-    let _guard = CONFIG_ENV_LOCK.lock().unwrap();
-    let dir = tempfile::tempdir().unwrap();
-    std::env::set_var("XDG_CONFIG_HOME", dir.path());
-
-    cli_bin()
+    let cli = Isolated::new();
+    cli.cli()
         .arg("search")
         .arg("cat")
         .assert()
@@ -167,11 +185,8 @@ fn test_search_no_token() {
 
 #[test]
 fn test_config_set_token_never_echoes_value() {
-    let _guard = CONFIG_ENV_LOCK.lock().unwrap();
-    let dir = tempfile::tempdir().unwrap();
-    std::env::set_var("XDG_CONFIG_HOME", dir.path());
-
-    cli_bin()
+    let cli = Isolated::new();
+    cli.cli()
         .arg("config")
         .arg("--set")
         .arg("refresh_token=super-secret-token-value")
@@ -183,18 +198,15 @@ fn test_config_set_token_never_echoes_value() {
 
 #[test]
 fn test_config_show_masks_token() {
-    let _guard = CONFIG_ENV_LOCK.lock().unwrap();
-    let dir = tempfile::tempdir().unwrap();
-    std::env::set_var("XDG_CONFIG_HOME", dir.path());
-
-    cli_bin()
+    let cli = Isolated::new();
+    cli.cli()
         .arg("config")
         .arg("--set")
         .arg("refresh_token=super-secret-token-value")
         .assert()
         .success();
 
-    cli_bin()
+    cli.cli()
         .arg("config")
         .arg("--show")
         .assert()
@@ -206,20 +218,19 @@ fn test_config_show_masks_token() {
 #[cfg(unix)]
 #[test]
 fn test_config_file_is_owner_only() {
-    let _guard = CONFIG_ENV_LOCK.lock().unwrap();
     use std::os::unix::fs::PermissionsExt;
 
-    let dir = tempfile::tempdir().unwrap();
-    std::env::set_var("XDG_CONFIG_HOME", dir.path());
-
-    cli_bin()
+    let cli = Isolated::new();
+    cli.cli()
         .arg("config")
         .arg("--set")
         .arg("grid_size=300")
         .assert()
         .success();
 
-    let path = dir.path().join("pixiv-manager").join("config.toml");
-    let mode = std::fs::metadata(&path).unwrap().permissions().mode();
+    let mode = std::fs::metadata(cli.config_file())
+        .unwrap()
+        .permissions()
+        .mode();
     assert_eq!(mode & 0o077, 0, "config must not be group/other readable");
 }

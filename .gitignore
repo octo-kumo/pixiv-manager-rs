@@ -1,5 +1,9 @@
-/target
-/Cargo.lock
+# Cargo build output. `target/` (not just `/target`) so a stray per-crate
+# target directory — which once committed probe screenshots — stays ignored.
+target/
+# Local-only toolchains/scratch used for cross-platform testing.
+/.toolchain/
+/.dsh/
 *.swp
 .DS_Store
 *.token

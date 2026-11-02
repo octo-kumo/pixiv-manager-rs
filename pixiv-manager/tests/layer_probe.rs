@@ -155,15 +155,16 @@ fn probe_scrolled_gallery() {
         ui.simulate([redraw()]);
     }
 
-    std::fs::create_dir_all("target/layer_probe").unwrap();
-    for entry in std::fs::read_dir("target/layer_probe").unwrap().flatten() {
+    // Probe artifacts go to the OS temp directory: a test must never write
+    // into the source tree (and never depend on a Unix-only path literal).
+    let probe_dir = std::env::temp_dir().join("pixiv-manager-layer-probe");
+    std::fs::create_dir_all(&probe_dir).unwrap();
+    for entry in std::fs::read_dir(&probe_dir).unwrap().flatten() {
         let _ = std::fs::remove_file(entry.path());
     }
     let snapshot = ui.snapshot(&iced::Theme::Dark).expect("snapshot");
-    snapshot
-        .matches_image("target/layer_probe/shot.png")
-        .unwrap();
-    let png = std::fs::read_dir("target/layer_probe")
+    snapshot.matches_image(probe_dir.join("shot.png")).unwrap();
+    let png = std::fs::read_dir(&probe_dir)
         .unwrap()
         .flatten()
         .map(|e| e.path())

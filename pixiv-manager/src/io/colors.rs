@@ -9,14 +9,9 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-/// Directory holding the color map (alongside the library).
-fn colors_dir() -> PathBuf {
-    crate::io::library::library_dir()
-}
-
-/// Where the color map lives.
+/// Where the color map lives (alongside the library).
 pub fn colors_path() -> PathBuf {
-    colors_dir().join("colors.json")
+    crate::io::paths::AppPaths::discover().colors_file()
 }
 
 /// Load the persisted color map (missing/corrupt → empty). Entries with an
@@ -29,23 +24,14 @@ pub fn load_colors() -> HashMap<u64, Vec<[u8; 3]>> {
     map.into_iter().filter(|(_, p)| !p.is_empty()).collect()
 }
 
-/// Save the color map atomically (temp file + rename).
+/// Save the color map atomically through the shared writer.
+///
+/// Best effort: a failed colour save must never take the app down, it only
+/// costs the user the (recomputable) palettes.
 pub fn save_colors(palettes: &HashMap<u64, Vec<[u8; 3]>>) {
-    use std::io::Write;
-    if let Some(parent) = colors_path().parent() {
-        let _ = std::fs::create_dir_all(parent);
+    if let Err(e) = crate::io::save_json_compact_atomic(palettes, &colors_path()) {
+        log::warn!("[colors] save failed: {e}");
     }
-    let Ok(content) = serde_json::to_string(palettes) else {
-        return;
-    };
-    let tmp = colors_path().with_extension("tmp");
-    let mut f = std::fs::File::create(&tmp).ok();
-    if let Some(f) = f.as_mut() {
-        let _ = f.write_all(content.as_bytes());
-        let _ = f.flush();
-    }
-    drop(f);
-    let _ = std::fs::rename(&tmp, colors_path());
 }
 
 #[cfg(test)]
@@ -71,6 +57,25 @@ mod tests {
         assert_eq!(loaded.len(), 2);
         assert_eq!(loaded[&1], vec![[255, 0, 0], [0, 255, 0]]);
         assert_eq!(loaded[&2], vec![[10, 20, 30]]);
+    }
+
+    /// Palettes are re-saved on every colour extraction; overwriting the
+    /// existing `colors.json` repeatedly must keep working on every OS.
+    #[test]
+    fn colors_survive_repeated_saves() {
+        let _guard = COLORS_TEST_LOCK.lock().unwrap();
+        crate::test_util::set_test_config_dir();
+
+        for round in 1..=5u8 {
+            let mut palettes = HashMap::new();
+            palettes.insert(100u64 + u64::from(round), vec![[round, round, round]]);
+            save_colors(&palettes);
+            let loaded = load_colors();
+            assert_eq!(
+                loaded[&(100u64 + u64::from(round))],
+                vec![[round, round, round]]
+            );
+        }
     }
 
     #[test]

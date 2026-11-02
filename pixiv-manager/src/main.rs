@@ -1,3 +1,12 @@
+// Release GUI builds are windowed applications: Windows must not attach a
+// console window to them. Debug builds keep the console so `RUST_LOG` output
+// stays visible while developing, and `pixiv-manager-cli` is a separate
+// console binary that is unaffected by this attribute.
+#![cfg_attr(
+    all(target_os = "windows", not(debug_assertions)),
+    windows_subsystem = "windows"
+)]
+
 use pixiv_manager::app::state::AppState;
 use pixiv_manager::app::subscription::subscription;
 use pixiv_manager::app::update::boot;
@@ -11,10 +20,11 @@ fn main() -> iced::Result {
 
     log::info!("=== Pixiv Manager starting ===");
     log::info!("Version: {}", env!("CARGO_PKG_VERSION"));
-    log::info!(
-        "Data dir: {:?}",
-        dirs::config_dir().map(|d| d.join("pixiv-manager"))
-    );
+    // Resolved through the path layer so this log is meaningful on every OS.
+    let paths = pixiv_manager::io::paths::AppPaths::discover();
+    log::info!("Config dir: {}", paths.config_dir.display());
+    log::info!("Data dir: {}", paths.data_dir.display());
+    log::info!("Cache dir: {}", paths.cache_dir.display());
 
     #[cfg(feature = "profiling")]
     {

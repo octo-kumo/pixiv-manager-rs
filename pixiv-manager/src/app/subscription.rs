@@ -168,7 +168,8 @@ pub fn subscription(state: &AppState) -> iced::Subscription<Message> {
         );
     }
 
-    // Ctrl+F focuses the search input (main phase, no overlay on top).
+    // Primary modifier + F focuses the search input (main phase, no overlay on
+    // top). macOS uses ⌘F, Linux/Windows Ctrl+F.
     if state.phase == crate::app::state::AppPhase::Main
         && !state.viewer.open
         && !state.artist.open
@@ -181,7 +182,8 @@ pub fn subscription(state: &AppState) -> iced::Subscription<Message> {
             else {
                 return None;
             };
-            match (key, modifiers.control()) {
+            // The platform's primary modifier (Ctrl everywhere, ⌘ on macOS).
+            match (key, crate::platform::primary_modifier(modifiers)) {
                 (iced::keyboard::Key::Character(c), true) if c == "f" => Some(Message::FocusSearch),
                 _ => None,
             }
@@ -219,13 +221,14 @@ pub fn subscription(state: &AppState) -> iced::Subscription<Message> {
         }));
     }
 
-    // Ctrl + / − / 0 adjust the gallery grid size (a common zoom convention).
+    // Primary modifier + / − / 0 adjust the gallery grid size (a common zoom
+    // convention): Ctrl+ on Linux/Windows, ⌘ on macOS.
     subs.push(iced::event::listen_with(|event, _status, _window| {
         let iced::Event::Keyboard(iced::keyboard::Event::KeyPressed { key, modifiers, .. }) = event
         else {
             return None;
         };
-        if !modifiers.control() {
+        if !crate::platform::primary_modifier(modifiers) {
             return None;
         }
         match key {

@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Pixiv Manager
+Comment=Browse, search, and manage Pixiv illustrations
+Exec=pixiv-manager
+Icon=pixiv-manager
+Terminal=false
+Categories=Graphics;Network;
+StartupNotify=false
+StartupWMClass=pixiv-manager

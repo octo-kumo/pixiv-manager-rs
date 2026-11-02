@@ -14,8 +14,10 @@ pub struct DebugData {
     pub os: String,
     pub arch: String,
     pub cores: usize,
-    pub mem_used_mb: f64,
-    pub mem_total_mb: f64,
+    /// Process RSS in MiB, or `None` when the platform cannot report it.
+    pub mem_used_mb: Option<f64>,
+    /// Total system RAM in MiB, or `None` when unavailable.
+    pub mem_total_mb: Option<f64>,
     pub gallery_items: usize,
     pub thumbnails: usize,
     pub thumb_attempts: u64,
@@ -80,21 +82,17 @@ impl Overlay {
             Line::new("OS", format!("{} ({})", self.data.os, self.data.arch)),
             Line::new("CPU", format!("{} cores", self.data.cores)),
         ];
-        let mem_frac = if self.data.mem_total_mb > 0.0 {
-            (self.data.mem_used_mb / self.data.mem_total_mb) as f32
-        } else {
-            0.0
+        // Memory figures are best effort: render `N/A` rather than a
+        // misleading `0/0 MB` on platforms where they are unavailable.
+        let mem_frac = match (self.data.mem_used_mb, self.data.mem_total_mb) {
+            (Some(used), Some(total)) if total > 0.0 => (used / total) as f32,
+            _ => 0.0,
         };
-        lines.push(
-            Line::new(
-                "MEM",
-                format!(
-                    "{:.0}/{:.0} MB",
-                    self.data.mem_used_mb, self.data.mem_total_mb
-                ),
-            )
-            .with_bar(mem_frac),
-        );
+        let mem_text = match (self.data.mem_used_mb, self.data.mem_total_mb) {
+            (Some(used), Some(total)) => format!("{used:.0}/{total:.0} MB"),
+            _ => "N/A".to_string(),
+        };
+        lines.push(Line::new("MEM", mem_text).with_bar(mem_frac));
         // Frame pacing: FPS + median frame time, measured from the actual
         // rendered-frame cadence (the root FrameTick widget).
         lines.push(Line::new(
