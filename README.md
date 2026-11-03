@@ -30,7 +30,8 @@ Every GitHub release ships `pixiv-manager-VERSION-x86_64-linux.tar.gz`, a
 portable `pixiv-manager-VERSION-x86_64-windows.zip` and
 `pixiv-manager-VERSION-aarch64-macos.tar.gz` (GUI + CLI + README, no installer,
 unsigned). The macOS build is Apple Silicon only and, like macOS support
-itself, experimental.
+itself, experimental. The Windows executables link the MSVC runtime statically,
+so no Visual C++ Redistributable is needed: extract the zip and run.
 
 ## Build & run
 

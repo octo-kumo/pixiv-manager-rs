@@ -76,6 +76,15 @@ jobs:
           sed -i -E '0,/^version = .*/s//version = "${{ needs.version.outputs.version }}"/' Cargo.toml
           cargo update -p pixiv-manager -p pixivj-rs
       - run: cargo build --release --workspace --locked --target x86_64-pc-windows-msvc
+      - name: Verify portable runtime
+        # The zip must run on a clean Windows install without the Visual C++
+        # Redistributable (VCRUNTIME140.dll); .cargo/config.toml links the
+        # static CRT, and this catches a regression before packaging.
+        shell: pwsh
+        run: |
+          ./scripts/check-windows-runtime.ps1 `
+            target/x86_64-pc-windows-msvc/release/pixiv-manager.exe `
+            target/x86_64-pc-windows-msvc/release/pixiv-manager-cli.exe
       - name: Package
         shell: pwsh
         run: |

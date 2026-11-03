@@ -2,3 +2,12 @@
 b = "build"
 t = "test"
 cl = "clippy"
+
+# The Windows zip is portable: link the MSVC runtime statically (/MT) so the
+# executables do not need VCRUNTIME140.dll from the Visual C++ Redistributable.
+# Keeping this here (instead of only in the release workflow) means the Windows
+# test and release-build CI jobs exercise the same runtime configuration users
+# download. Native `cargo build` also picks it up because the host target is
+# x86_64-pc-windows-msvc.
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]

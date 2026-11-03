@@ -66,4 +66,10 @@ jobs:
       - name: Verify binaries (windows)
         if: runner.os == 'Windows'
         shell: pwsh
-        run: .\target\release\pixiv-manager-cli.exe --version
+        run: |
+          .\target\release\pixiv-manager-cli.exe --version
+          # .cargo/config.toml links the static MSVC CRT; fail if the release
+          # binaries would need VCRUNTIME140.dll on a clean Windows install.
+          .\scripts\check-windows-runtime.ps1 `
+            .\target\release\pixiv-manager.exe `
+            .\target\release\pixiv-manager-cli.exe
