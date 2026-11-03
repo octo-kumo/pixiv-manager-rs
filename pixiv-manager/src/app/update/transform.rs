@@ -286,6 +286,11 @@ mod tests {
     use super::*;
     use crate::viewer_tools::MergeAxis;
 
+    /// Tests assert on state; the returned task is irrelevant.
+    fn apply(state: &mut AppState, message: Message) {
+        let _ = handle(state, message);
+    }
+
     fn twitter_viewer() -> AppState {
         let mut state = AppState::default();
         state.viewer.open = true;
@@ -298,7 +303,7 @@ mod tests {
     fn rotate_and_undo_roundtrip() {
         let mut state = twitter_viewer();
         let id = state.viewer.illust_id;
-        handle(&mut state, Message::ViewerRotate(1));
+        apply(&mut state, Message::ViewerRotate(1));
         assert_eq!(
             desired_key(&state),
             Some(TransformKey {
@@ -307,7 +312,7 @@ mod tests {
                 rotation: 1
             })
         );
-        handle(&mut state, Message::ViewerRotate(-1));
+        apply(&mut state, Message::ViewerRotate(-1));
         assert!(desired_key(&state).is_none());
         assert!(!state.view_transforms.contains_key(&id));
     }
@@ -315,19 +320,19 @@ mod tests {
     #[test]
     fn merge_rotation_is_separate_from_page_rotation() {
         let mut state = twitter_viewer();
-        handle(&mut state, Message::ViewerRotate(1));
-        handle(
+        apply(&mut state, Message::ViewerRotate(1));
+        apply(
             &mut state,
             Message::ViewerMergeToggled(MergeAxis::Horizontal),
         );
         let key = desired_key(&state).unwrap();
         assert_eq!(key.target, TransformTarget::Merged(MergeAxis::Horizontal));
         assert_eq!(key.rotation, 0);
-        handle(&mut state, Message::ViewerRotate(2));
+        apply(&mut state, Message::ViewerRotate(2));
         assert_eq!(desired_key(&state).unwrap().rotation, 2);
         // Clicking the same axis again undoes the merge; the page's own
         // rotation is still there.
-        handle(
+        apply(
             &mut state,
             Message::ViewerMergeToggled(MergeAxis::Horizontal),
         );
@@ -335,7 +340,7 @@ mod tests {
             desired_key(&state).unwrap().target,
             TransformTarget::Page(0)
         );
-        handle(&mut state, Message::ViewerTransformReset);
+        apply(&mut state, Message::ViewerTransformReset);
         assert!(desired_key(&state).is_none());
     }
 
@@ -343,13 +348,13 @@ mod tests {
     fn tools_ignore_non_twitter_and_disabled() {
         let mut state = twitter_viewer();
         state.settings.twitter_viewer_tools = false;
-        handle(&mut state, Message::ViewerRotate(1));
+        apply(&mut state, Message::ViewerRotate(1));
         assert!(state.view_transforms.is_empty());
 
         let mut pixiv = AppState::default();
         pixiv.viewer.open = true;
         pixiv.viewer.illust_id = 7;
-        handle(&mut pixiv, Message::ViewerRotate(1));
+        apply(&mut pixiv, Message::ViewerRotate(1));
         assert!(pixiv.view_transforms.is_empty());
     }
 }

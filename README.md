@@ -20,21 +20,53 @@ Twitter (`pixiv-manager/src/twitter`) and Bilibili
 (`pixiv-manager/src/bilibili`) that fold their posts into the same unified
 media model.
 
+## Supported platforms
+
+Linux x86-64 and Windows 10/11 x86-64 are supported and tested. macOS builds
+and passes the test suite in CI but has not had an interactive GUI test, so it
+is experimental.
+
+Every GitHub release ships `pixiv-manager-VERSION-x86_64-linux.tar.gz`, a
+portable `pixiv-manager-VERSION-x86_64-windows.zip` and
+`pixiv-manager-VERSION-aarch64-macos.tar.gz` (GUI + CLI + README, no installer,
+unsigned). The macOS build is Apple Silicon only and, like macOS support
+itself, experimental.
+
 ## Build & run
 
+Requires stable Rust (pinned by `rust-toolchain`). On Windows the rustls crypto
+provider needs CMake and NASM on `PATH`.
+
 ```bash
-cargo build --release
+cargo build --release --locked
 ./target/release/pixiv-manager        # GUI
 ./target/release/pixiv-manager-cli    # CLI (Pixiv)
 ```
 
-Tests / lints (what CI runs):
+`./install.sh` is the Linux installer (`~/.local/bin` plus a KDE desktop
+entry).
+
+Tests / lints (what CI runs, on Linux, Windows and macOS):
 
 ```bash
 cargo fmt --check
-cargo clippy --workspace --all-targets -- -D warnings
-cargo test --workspace
+cargo clippy --workspace -- -D warnings
+cargo test --workspace --locked
 ```
+
+`Cargo.lock` is committed, so every platform and release resolves the same
+dependency graph.
+
+### Where files live
+
+| | Linux | Windows | macOS |
+|---|---|---|---|
+| `config.toml` (refresh token, cookie hints) | `~/.config/pixiv-manager/` | `%APPDATA%\pixiv-manager\` | `~/Library/Application Support/pixiv-manager/` |
+| Library, queue, colours, metadata, viewer transforms | `~/.local/share/pixiv-manager/library/` | `%LOCALAPPDATA%\pixiv-manager\data\library\` | `~/Library/Application Support/pixiv-manager/data/library/` |
+| Image cache (disposable) | `~/.cache/pixiv-manager/` | `%LOCALAPPDATA%\pixiv-manager\cache\` | `~/Library/Caches/pixiv-manager/` |
+
+`PIXIV_MANAGER_CONFIG_DIR` overrides all three with one directory (tests and
+portable installs).
 
 ## Twitter / X setup
 
@@ -43,16 +75,18 @@ internal GraphQL endpoints as x.com, authenticated with your browser cookies.
 
 1. Export your x.com cookies in Netscape `cookies.txt` format (any "export
    cookies" browser extension works; keep `auth_token`, `ct0` and `twid`).
-2. Either drop the file at `./twitter_cookies.txt` /
-   `~/.config/pixiv-manager/twitter_cookies.txt`, or point the app at it in
-   **Settings → Twitter cookies file** and press **Reload**.
+2. Either drop the file at `./twitter_cookies.txt` or next to `config.toml`
+   (the app's config directory — the exact path is the hint in **Settings →
+   Twitter cookies file**), or point the app at the file there and press
+   **Reload**.
 3. The Twitter tab now shows your home timeline (For You / Following, photo
    tweets only). The Bookmarks tab mixes Pixiv bookmarks with your liked
    tweets; liking a tweet in the app auto-downloads its photos, and the
    bookmark sync pulls likes into the local library.
 
 The cookies are only ever sent to `x.com` / `abs.twimg.com`; the file is
-gitignored and never read by tests.
+gitignored and never read by tests. The app never reads browser cookie
+databases or OS credential stores — you export the file yourself.
 
 ## Bilibili setup
 
@@ -60,9 +94,9 @@ Bilibili's web APIs are used directly with your browser cookies (`SESSDATA`,
 `bili_jct` and `DedeUserID`).
 
 1. Export your bilibili.com cookies in Netscape `cookies.txt` format.
-2. Either drop the file at `./bilibili_cookies.txt` /
-   `~/.config/pixiv-manager/bilibili_cookies.txt`, or set it in
-   **Settings → Bilibili cookies file** and press **Reload**.
+2. Either drop the file at `./bilibili_cookies.txt` or next to `config.toml`
+   (the exact path is the hint in **Settings → Bilibili cookies file**), or set
+   it there and press **Reload**.
 3. The Bilibili tab shows image dynamics (`DYNAMIC_TYPE_DRAW` / opus posts
    with pictures; videos and text-only posts are skipped) from either:
    - **Following** — everyone you follow (`t.bilibili.com`), or

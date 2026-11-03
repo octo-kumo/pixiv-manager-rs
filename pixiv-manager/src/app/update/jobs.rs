@@ -411,8 +411,11 @@ impl IllustDownloader {
                             );
                             let path = self.gallery_dir.join(&filename);
                             let path_for_fs = path.clone();
+                            // Atomic so a crash/power loss can never leave a
+                            // truncated image that the "already downloaded"
+                            // check would then treat as complete.
                             match tokio::task::spawn_blocking(move || {
-                                std::fs::write(&path_for_fs, &bytes)
+                                crate::io::write_atomic(&path_for_fs, &bytes)
                             })
                             .await
                             {

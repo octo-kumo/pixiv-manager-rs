@@ -1,1 +1,7 @@
-nightly
+# One toolchain for everyone: local dev, CI and release builds. The workspace
+# previously pinned `nightly` locally while CI built on stable, which meant a
+# nightly-only construct could pass review and break the release pipeline.
+[toolchain]
+channel = "stable"
+components = ["rustfmt", "clippy"]
+profile = "minimal"

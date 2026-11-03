@@ -1,15 +1,69 @@
 name: CI
 on: [push, pull_request]
 
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  check:
+  format:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@nightly
+      - uses: dtolnay/rust-toolchain@stable
         with:
-          components: rustfmt, clippy
+          components: rustfmt
       - run: cargo fmt --check
-      - run: cargo clippy --workspace -- -D warnings
-      - run: cargo test --workspace
-      - run: cargo build --release --workspace
+
+  clippy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo clippy --workspace --locked -- -D warnings
+
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      # aws-lc-sys needs CMake + NASM on Windows; checking them makes a runner
+      # image change fail with a clear message instead of a cryptic compiler log.
+      - name: Verify Windows C toolchain
+        if: runner.os == 'Windows'
+        run: |
+          cmake --version
+          nasm -v
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test --workspace --locked
+
+  release-build:
+    needs: [test]
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --release --workspace --locked
+      - name: Verify binaries (unix)
+        if: runner.os != 'Windows'
+        run: ./target/release/pixiv-manager-cli --version
+      - name: Verify binaries (windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: .\target\release\pixiv-manager-cli.exe --version

@@ -33,11 +33,12 @@ pub async fn build_client(
 }
 
 /// The default directory for downloaded illusts when no gallery path is set
-/// (`~/Pictures/pixiv`, falling back to `./pixiv`).
+/// (`Pictures/pixiv` on every platform, falling back to `./pixiv`).
+///
+/// The decision itself lives in the path layer so no module outside
+/// `io::paths` calls `dirs::*`.
 pub fn default_gallery_dir() -> PathBuf {
-    dirs::picture_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join("pixiv")
+    crate::io::paths::AppPaths::discover().default_gallery_dir()
 }
 
 /// The per-illust download directory: `{gallery}/{id}` for Pixiv and
@@ -77,11 +78,13 @@ fn parse_dir_id(name: &str) -> Option<u64> {
     digits.parse::<u64>().ok()
 }
 
-/// Migrate an illust's download directory from the OLD `{id}_{title}` format
-/// to the new `{id}` format. Looks for a directory matching `<id>_*`; if one
-/// exists (and looks like a download dir — it contains image files), renames
-/// it to `{id}`. Returns the path of the migrated (or pre-existing) dir, or
-/// `None` when nothing is on disk for `id`.
+/// Migrate an illust's download directory from the legacy `{id}_{title}` name
+/// to `{id}`, returning the directory that actually holds the images.
+///
+/// A rename can fail (the directory or a file inside it is open on Windows,
+/// permissions, a concurrent process). In that case the legacy directory is
+/// returned unchanged: the caller keeps reading the files the user already has
+/// instead of being told they moved when they did not.
 pub fn migrate_download_dir(gallery_path: &Path, id: u64) -> Option<PathBuf> {
     let new_dir = gallery_path.join(download_dir_name(id));
     if new_dir.is_dir() {
@@ -110,8 +113,15 @@ pub fn migrate_download_dir(gallery_path: &Path, id: u64) -> Option<PathBuf> {
             // Only migrate if it actually holds images (avoid clobbering a
             // dir that merely happens to start with the id).
             if dir_has_images(&path) {
-                let _ = std::fs::rename(&path, &new_dir);
-                return Some(new_dir);
+                if std::fs::rename(&path, &new_dir).is_ok() || new_dir.is_dir() {
+                    return Some(new_dir);
+                }
+                log::warn!(
+                    "[core] could not rename {} to {}; keeping the existing directory",
+                    path.display(),
+                    new_dir.display()
+                );
+                return Some(path);
             }
         }
     }
@@ -416,9 +426,10 @@ trait ReservedWindowsName {
 
 impl ReservedWindowsName for str {
     fn is_reserved_windows_name(&self) -> bool {
-        // A reserved name is one of the table (an extension like `CON.txt`
-        // is also reserved on Windows, but callers here strip extensions).
-        RESERVED_WINDOWS_NAMES.contains(&self)
+        // Windows reserves the device name whatever follows the dot
+        // (`CON.txt` is still the console device).
+        let stem = self.split('.').next().unwrap_or(self);
+        RESERVED_WINDOWS_NAMES.contains(&stem)
     }
 }
 
@@ -448,6 +459,14 @@ mod tests {
         let capped = sanitize_filename(&long_utf8);
         assert_eq!(capped.chars().count(), 100);
         assert!(capped.is_char_boundary(capped.len()));
+    }
+
+    #[test]
+    fn handles_windows_reserved_names_with_extensions() {
+        assert_eq!(sanitize_filename("CON.txt"), "_CON.txt");
+        assert_eq!(sanitize_filename("nul.log"), "_nul.log");
+        assert_eq!(sanitize_filename("COM1.tar.gz"), "_COM1.tar.gz");
+        assert_eq!(sanitize_filename("console"), "console");
     }
 
     #[test]

@@ -1,21 +1,14 @@
-//! Profiling telemetry.
+//! Profiling telemetry (feature `profiling`).
 //!
-//! With the `profiling` feature enabled this adds:
-//!
-//! * [`memory`] — a tagged `#[global_allocator]` attributing allocation churn
-//!   to the component that was active when the allocation happened.
-//! * [`cpu`] — a `pprof-rs` sampling profiler whose capture can be triggered
-//!   over HTTP (agent-friendly) or directly.
-//! * [`report`] — the markdown/JSON report writer that answers the seven
-//!   profiling questions.
-//! * [`http`] — a tiny control server for the running GUI app so an agent can
-//!   start/stop a CPU capture and pull a flamegraph with `curl`.
-//!
-//! With the feature **off**, every function degrades to a transparent no-op
-//! (e.g. [`timed_update`] just calls `update`), so call sites stay clean and
-//! normal builds pay zero cost.
+//! With the feature off every hook is a no-op. CPU sampling needs `pprof`,
+//! which is Unix-only; the remaining pieces (allocation tagging, timings,
+//! reports, HTTP control server) are portable.
 
-#[cfg(feature = "profiling")]
+#[cfg(all(feature = "profiling", unix))]
+#[path = "cpu.rs"]
+pub mod cpu;
+#[cfg(all(feature = "profiling", not(unix)))]
+#[path = "cpu_stub.rs"]
 pub mod cpu;
 #[cfg(feature = "profiling")]
 pub mod http;

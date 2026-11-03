@@ -1,7 +1,8 @@
 name: Release
-# Runs after CI succeeds on master. The version is MAJOR.MINOR from
-# [workspace.package] in Cargo.toml; the patch is auto-incremented from the
-# latest matching tag (reset to 0 when MAJOR.MINOR is bumped by hand).
+
+# Runs after CI succeeds on master. The version is computed once and every
+# platform build uses it with the same commit; a single publish job creates the
+# release and fails if any platform artifact is missing.
 on:
   workflow_run:
     workflows: [CI]
@@ -14,35 +15,169 @@ permissions:
 concurrency: release
 
 jobs:
-  release:
+  version:
     if: github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push'
     runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      sha: ${{ steps.version.outputs.sha }}
     steps:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.event.workflow_run.head_sha }}
           fetch-depth: 0
-      - uses: dtolnay/rust-toolchain@stable
-      - name: Compute version
-        id: ver
+      - name: Determine version
+        id: version
         run: |
           base=$(grep -m1 '^version' Cargo.toml | sed -E 's/.*"([0-9]+\.[0-9]+)\.[0-9]+".*/\1/')
           last=$(git tag -l "v${base}.*" | sed -E 's/.*\.([0-9]+)$/\1/' | sort -n | tail -1)
-          next=$(( ${last:--1} + 1 ))
-          echo "version=${base}.${next}" >> "$GITHUB_OUTPUT"
+          echo "version=${base}.$(( ${last:--1} + 1 ))" >> "$GITHUB_OUTPUT"
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+  linux:
+    needs: version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.version.outputs.sha }}
+      - uses: dtolnay/rust-toolchain@stable
       - name: Stamp version
+        # Cargo.lock records workspace versions, so refresh it before --locked.
         run: |
-          sed -i -E '0,/^version = .*/s//version = "${{ steps.ver.outputs.version }}"/' Cargo.toml
-      - run: cargo build --release --workspace
+          sed -i -E '0,/^version = .*/s//version = "${{ needs.version.outputs.version }}"/' Cargo.toml
+          cargo update -p pixiv-manager -p pixivj-rs
+      - run: cargo build --release --workspace --locked
       - name: Package
         run: |
-          name=pixiv-manager-${{ steps.ver.outputs.version }}-x86_64-linux
+          name=pixiv-manager-${{ needs.version.outputs.version }}-x86_64-linux
           mkdir "$name"
           cp target/release/pixiv-manager target/release/pixiv-manager-cli README.md "$name"/
           tar czf "$name.tar.gz" "$name"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux
+          path: pixiv-manager-*-x86_64-linux.tar.gz
+          if-no-files-found: error
+
+  windows:
+    needs: version
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.version.outputs.sha }}
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+      - name: Stamp version
+        shell: bash
+        run: |
+          sed -i -E '0,/^version = .*/s//version = "${{ needs.version.outputs.version }}"/' Cargo.toml
+          cargo update -p pixiv-manager -p pixivj-rs
+      - run: cargo build --release --workspace --locked --target x86_64-pc-windows-msvc
+      - name: Package
+        shell: pwsh
+        run: |
+          $name = "pixiv-manager-${{ needs.version.outputs.version }}-x86_64-windows"
+          New-Item -ItemType Directory -Force $name | Out-Null
+          Copy-Item "target/x86_64-pc-windows-msvc/release/pixiv-manager.exe" $name
+          Copy-Item "target/x86_64-pc-windows-msvc/release/pixiv-manager-cli.exe" $name
+          Copy-Item README.md $name
+          Compress-Archive -Path "$name/*" -DestinationPath "$name.zip"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: pixiv-manager-*-x86_64-windows.zip
+          if-no-files-found: error
+
+  macos:
+    needs: version
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.version.outputs.sha }}
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin
+      - name: Stamp version
+        run: |
+          sed -i -E '0,/^version = .*/s//version = "${{ needs.version.outputs.version }}"/' Cargo.toml
+          cargo update -p pixiv-manager -p pixivj-rs
+      - run: cargo build --release --workspace --locked --target aarch64-apple-darwin
+      - name: Package
+        run: |
+          name=pixiv-manager-${{ needs.version.outputs.version }}-aarch64-macos
+          mkdir "$name"
+          cp target/aarch64-apple-darwin/release/pixiv-manager \
+             target/aarch64-apple-darwin/release/pixiv-manager-cli \
+             README.md "$name"/
+          tar czf "$name.tar.gz" "$name"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos
+          path: pixiv-manager-*-aarch64-macos.tar.gz
+          if-no-files-found: error
+
+  publish:
+    needs: [version, linux, windows, macos]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Verify artifacts
+        run: |
+          set -euo pipefail
+          version="${{ needs.version.outputs.version }}"
+          linux="pixiv-manager-${version}-x86_64-linux.tar.gz"
+          windows="pixiv-manager-${version}-x86_64-windows.zip"
+          macos="pixiv-manager-${version}-aarch64-macos.tar.gz"
+          for artifact in "$linux" "$windows" "$macos"; do
+            test -f "dist/${artifact}" || { echo "::error::missing ${artifact}"; exit 1; }
+          done
+          unzip -Z1 "dist/${windows}" | sort > /tmp/zip-contents.txt
+          for entry in pixiv-manager.exe pixiv-manager-cli.exe README.md; do
+            grep -qx "${entry}" /tmp/zip-contents.txt || { echo "::error::${windows} is missing ${entry}"; exit 1; }
+          done
+          ls -l dist
+      - name: Checksums
+        run: |
+          cd dist
+          sha256sum pixiv-manager-*.tar.gz pixiv-manager-*.zip > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+      - name: Verify release contents
+        run: |
+          set -euo pipefail
+          version="${{ needs.version.outputs.version }}"
+          expected=$(printf '%s\n' \
+            "pixiv-manager-${version}-x86_64-linux.tar.gz" \
+            "pixiv-manager-${version}-x86_64-windows.zip" \
+            "pixiv-manager-${version}-aarch64-macos.tar.gz" \
+            "SHA256SUMS.txt" | sort)
+          actual=$(cd dist && ls -A | sort)
+          if [ "${actual}" != "${expected}" ]; then
+            echo "::error::unexpected files in dist/"
+            diff <(echo "${expected}") <(echo "${actual}") || true
+            exit 1
+          fi
+          echo "release will contain exactly:"
+          echo "${actual}"
       - name: Publish release
         env:
           GH_TOKEN: ${{ github.token }}
+          # `gh` infers the repository from a checkout; this job deliberately has
+          # none, so the repository is always passed explicitly.
+          GH_REPO: ${{ github.repository }}
         run: |
-          v=v${{ steps.ver.outputs.version }}
-          gh release create "$v" ./*.tar.gz --target "${{ github.event.workflow_run.head_sha }}" --title "$v" --generate-notes
+          set -euo pipefail
+          repo="${{ github.repository }}"
+          tag="v${{ needs.version.outputs.version }}"
+          test -n "${repo}" || { echo "::error::github.repository is empty"; exit 1; }
+          gh release create "${tag}" dist/* \
+            --repo "${repo}" \
+            --target "${{ needs.version.outputs.sha }}" \
+            --title "${tag}" \
+            --generate-notes

@@ -135,13 +135,15 @@ fn clip_layer_scissors_translated_children() {
     let _thumbs = &ui;
     let snapshot = ui.snapshot(&iced::Theme::Dark).expect("snapshot");
 
-    for entry in std::fs::read_dir("target/layer_probe").unwrap().flatten() {
+    // Same as layer_probe: keep probe artifacts out of the source tree.
+    let probe_dir =
+        std::env::temp_dir().join(format!("pixiv-manager-probe-{}", std::process::id()));
+    std::fs::create_dir_all(&probe_dir).unwrap();
+    for entry in std::fs::read_dir(&probe_dir).unwrap().flatten() {
         let _ = std::fs::remove_file(entry.path());
     }
-    snapshot
-        .matches_image("target/layer_probe/min.png")
-        .unwrap();
-    let png = std::fs::read_dir("target/layer_probe")
+    snapshot.matches_image(probe_dir.join("min.png")).unwrap();
+    let png = std::fs::read_dir(&probe_dir)
         .unwrap()
         .flatten()
         .map(|e| e.path())

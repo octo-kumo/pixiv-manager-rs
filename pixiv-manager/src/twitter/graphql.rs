@@ -187,7 +187,7 @@ impl GraphQlConfig {
     /// so a later client reload/restart picks it up. Only operations that
     /// differ from the compiled defaults are written, keeping the file a
     /// minimal diff that new app versions can extend.
-    pub fn save_queries(&self, path: &Path) -> std::io::Result<()> {
+    pub fn save_queries(&self, path: &Path) -> Result<(), crate::io::AtomicWriteError> {
         #[derive(serde::Serialize)]
         struct File<'a> {
             queries: std::collections::BTreeMap<&'a str, &'a str>,

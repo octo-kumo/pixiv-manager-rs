@@ -61,7 +61,7 @@ async fn download_one(client: &pixivj_rs::api::PixivApiClient, illust_id: u64) {
                 let filename = crate::core::image_filename(illust.id, i, total, ext);
 
                 let path = dir.join(&filename);
-                match std::fs::write(&path, &bytes) {
+                match crate::io::write_atomic(&path, &bytes) {
                     Ok(()) => println!("OK ({})", path.display()),
                     Err(e) => println!("write error: {}", e),
                 }

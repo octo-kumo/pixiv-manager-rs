@@ -1,7 +1,7 @@
 use crate::app::message::Message;
 use crate::app::state::{AppPhase, AppState, JobsState};
 use crate::image::cache::ImageCache;
-use crate::io::config::{cache_dir, fix_config_permissions, load_config};
+use crate::io::config::{fix_config_permissions, load_config};
 use crate::io::library::BookmarkLibrary;
 use onboarding::{build_client_async, start_onboarding};
 use pixivj_rs::error::PixivError;
@@ -25,17 +25,30 @@ pub(super) const AUTO_LOAD_MAX_PAGES: u32 = 3;
 ///   first fetch fails and we fall back to onboarding.
 pub fn boot() -> (AppState, iced::Task<Message>) {
     log::info!("[boot] === boot() called ===");
+    let paths = crate::io::paths::AppPaths::discover();
+    // Before anything reads the library or the cache.
+    crate::io::migrate::run_startup_migrations(&paths);
+    // Restrict any pre-existing config to owner-only (it holds the token).
+    fix_config_permissions();
+
     // Default to dark until the OS reports its actual dark/light preference.
     let mut state = AppState {
         theme_mode: iced::theme::Mode::Dark,
         ..AppState::default()
     };
-    // The image caches' RAM budgets follow the memory preset.
+    if let Some(config) = load_config() {
+        log::info!("[boot] Config loaded from disk");
+        state.settings = config;
+    } else {
+        log::info!("[boot] No config file found");
+    }
+
+    // Caches are created once, sized from the settings that were just loaded.
     let budget = crate::image::cache::DEFAULT_MEMORY_BUDGET
         * state.settings.memory_preset.cache_budget_multiplier();
-    state.images.image_cache = Arc::new(ImageCache::new(cache_dir(), budget));
+    state.images.image_cache = Arc::new(ImageCache::new(paths.image_cache_dir(), budget));
     state.images.thumbnail_cache = Arc::new(ImageCache::new(
-        cache_dir().join("thumb"),
+        paths.image_cache_dir().join("thumb"),
         budget.max(crate::image::cache::DEFAULT_MEMORY_BUDGET),
     ));
     state.jobs = JobsState {
@@ -52,9 +65,6 @@ pub fn boot() -> (AppState, iced::Task<Message>) {
     // Load a system emoji font so emoji in comments render (best-effort).
     boot_tasks.push(emoji_font_task());
 
-    // Restrict any pre-existing config to owner-only (it holds the token).
-    fix_config_permissions();
-
     state.view_transforms = crate::viewer_tools::load();
 
     // Load the centralized color map (palettes for the sRGB/Hue sorts).
@@ -64,22 +74,6 @@ pub fn boot() -> (AppState, iced::Task<Message>) {
         state.images.palettes.len()
     );
 
-    // Try to load saved config
-    if let Some(config) = load_config() {
-        log::info!("[boot] Config loaded from disk");
-        state.settings = config;
-    } else {
-        log::info!("[boot] No config file found");
-    }
-    // Apply the configured memory preset to the freshly loaded settings
-    // (the caches were sized from the default preset above).
-    let budget = crate::image::cache::DEFAULT_MEMORY_BUDGET
-        * state.settings.memory_preset.cache_budget_multiplier();
-    state.images.image_cache = Arc::new(ImageCache::new(cache_dir(), budget));
-    state.images.thumbnail_cache = Arc::new(ImageCache::new(
-        cache_dir().join("thumb"),
-        budget.max(crate::image::cache::DEFAULT_MEMORY_BUDGET),
-    ));
     // The "hide bookmarked" option seeds every tab's Bookmarked tristate.
     gallery::apply_bookmark_filter_defaults(&mut state);
     // Apply the configured animation frame-rate limit.
@@ -117,15 +111,9 @@ pub fn boot() -> (AppState, iced::Task<Message>) {
 
 /// Load a system emoji font (if present) so emoji render instead of boxes.
 fn emoji_font_task() -> iced::Task<Message> {
-    const CANDIDATES: &[&str] = &[
-        "/usr/share/fonts/google-noto-color-emoji-fonts/Noto-COLRv1.ttf",
-        "/usr/share/fonts/truetype/noto/NotoColorEmoji.ttf",
-        "/usr/share/fonts/opentype/noto/NotoColorEmoji.ttf",
-        "/usr/share/fonts/noto/NotoColorEmoji.ttf",
-    ];
-    for path in CANDIDATES {
-        if let Ok(bytes) = std::fs::read(path) {
-            log::info!("[boot] Loading emoji font from {}", path);
+    for path in crate::platform::fonts::emoji_font_candidates() {
+        if let Ok(bytes) = std::fs::read(&path) {
+            log::info!("[boot] Loading emoji font from {}", path.display());
             return iced::font::load(bytes).map(|_| Message::Noop);
         }
     }

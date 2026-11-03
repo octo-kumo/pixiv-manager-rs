@@ -2,29 +2,37 @@
 //! every binding; Esc or F1 closes it.
 
 use crate::app::message::Message;
+use crate::platform::shortcuts::primary_shortcut;
 use crate::theme;
 
-/// Every keyboard shortcut the app supports, shown in the overlay (and the
-/// help screen's hotkeys section).
-pub const SHORTCUTS: &[(&str, &str)] = &[
-    ("Esc", "Close topmost overlay / panel"),
-    ("←  →", "Viewer: previous / next page"),
-    ("Alt+← / Alt+→", "Viewer: back / forward in history"),
-    ("Home / End", "Viewer: first / last page"),
-    ("↑  ↓", "Search: move autocomplete selection"),
-    ("Enter", "Search: pick suggestion / run query"),
-    ("Ctrl+F", "Focus the search box"),
-    ("Ctrl+ +/−/0", "Grid size bigger / smaller / reset"),
-    ("F1", "Toggle this help"),
-    ("F3", "Toggle the debug overlay"),
-];
+/// Every keyboard shortcut, shown in the overlay and the help screen. The
+/// primary-modifier rows come from the platform layer.
+pub fn shortcuts() -> Vec<(String, &'static str)> {
+    vec![
+        ("Esc".to_string(), "Close topmost overlay / panel"),
+        ("←  →".to_string(), "Viewer: previous / next page"),
+        (
+            "Alt+← / Alt+→".to_string(),
+            "Viewer: back / forward in history",
+        ),
+        ("Home / End".to_string(), "Viewer: first / last page"),
+        ("↑  ↓".to_string(), "Search: move autocomplete selection"),
+        ("Enter".to_string(), "Search: pick suggestion / run query"),
+        (primary_shortcut("F"), "Focus the search box"),
+        (primary_shortcut("+"), "Gallery grid: bigger"),
+        (primary_shortcut("-"), "Gallery grid: smaller"),
+        (primary_shortcut("0"), "Gallery grid: reset size"),
+        ("F1".to_string(), "Toggle this help"),
+        ("F3".to_string(), "Toggle the debug overlay"),
+    ]
+}
 
 pub fn shortcuts_overlay(t: &iced::Theme) -> iced::Element<'static, Message> {
-    let rows: Vec<iced::Element<'static, Message>> = SHORTCUTS
+    let rows: Vec<iced::Element<'static, Message>> = shortcuts()
         .iter()
         .map(|(key, action)| {
             iced::widget::row![
-                iced::widget::text(*key)
+                iced::widget::text(key.clone())
                     .size(12)
                     .color(theme::accent(t))
                     .width(iced::Length::Fixed(150.0)),

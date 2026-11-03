@@ -3,20 +3,16 @@ use sha2::{Digest, Sha256};
 use std::path::PathBuf;
 use std::sync::Mutex;
 
+/// Only temp files older than this are removed: a younger one may belong to a
+/// concurrent writer in another process.
+const STALE_TEMP_AGE: std::time::Duration = std::time::Duration::from_secs(3600);
+
 /// Default in-memory budget for cached image bytes (96 MB).
 pub const DEFAULT_MEMORY_BUDGET: usize = 96 * 1024 * 1024;
 
-/// A crash-safe, two-layer image cache.
-///
-/// * **RAM layer**: an LRU of raw image bytes, evicted by a byte budget.
-/// * **Disk layer**: files keyed by `sha256(url)` under a directory.
-///   Writes are atomic (temp file + rename), so a crash mid-write can only
-///   leave a harmless `.tmp` file, never a corrupt entry. Corrupt entries
-///   found on read are deleted and treated as a miss.
-///
-/// Safe to share across threads (`&self` methods only; interior mutability
-/// via `Mutex`). Not `Debug`/`Clone`-friendly by design — the app shares one
-/// instance behind an `Arc`.
+/// Two-layer image cache: an LRU of raw bytes in RAM plus files keyed by
+/// `sha256(url)` on disk. Corrupt disk entries are deleted and treated as a
+/// miss. The app shares one instance behind an `Arc`.
 pub struct ImageCache {
     disk_dir: PathBuf,
     memory: Mutex<LruCache<String, Vec<u8>>>,
@@ -38,19 +34,11 @@ impl Default for ImageCache {
 
 impl ImageCache {
     /// Create a cache backed by `disk_dir` with the given RAM byte budget.
-    /// Creates the directory if missing and cleans stale temp files.
     pub fn new(disk_dir: PathBuf, max_memory_bytes: usize) -> Self {
         let _ = std::fs::create_dir_all(&disk_dir);
-        // Clean up partial writes left behind by a crash.
-        if let Ok(entries) = std::fs::read_dir(&disk_dir) {
-            for entry in entries.flatten() {
-                let name = entry.file_name();
-                let name = name.to_string_lossy();
-                if name.ends_with(".tmp") {
-                    let _ = std::fs::remove_file(entry.path());
-                }
-            }
-        }
+        // Only crash leftovers: an age guard keeps a live writer's temp file
+        // safe when two processes share the cache.
+        crate::io::cleanup_stale_atomic_temps(&disk_dir, STALE_TEMP_AGE);
         Self {
             disk_dir,
             memory: Mutex::new(LruCache::unbounded()),
@@ -165,8 +153,7 @@ impl ImageCache {
             for entry in entries.flatten() {
                 let path = entry.path();
                 let name = entry.file_name();
-                let name = name.to_string_lossy();
-                if !name.ends_with(".tmp") {
+                if !crate::io::is_atomic_temp_file(&name) {
                     let _ = std::fs::remove_file(path);
                 }
             }
@@ -174,40 +161,63 @@ impl ImageCache {
     }
 }
 
-/// Write `bytes` to `dir/key` atomically: temp file + rename. A crash can
-/// only leave a `.tmp` file behind (cleaned on next startup), never a
-/// half-written entry at the final path.
+/// Write `bytes` to `dir/key` through the shared atomic writer.
 fn write_atomic(dir: &std::path::Path, key: &str, bytes: &[u8]) {
     let final_path = dir.join(key);
-    let tmp_path = dir.join(format!("{}.tmp", key));
-    #[cfg(feature = "profiling")]
-    let start = std::time::Instant::now();
-    if let Err(e) = std::fs::write(&tmp_path, bytes) {
-        log::warn!("[image_cache] disk write failed: {}", e);
+    if let Err(e) = crate::io::write_atomic(&final_path, bytes) {
+        log::warn!("[image_cache] disk write failed: {e}");
+    }
+}
+
+/// Best-effort move of a legacy cache tree into the current cache directory.
+///
+/// Recursive because the cache has namespaces (thumbnails live in `thumb/`).
+/// The cache is disposable: failures are logged and the legacy tree is left
+/// in place rather than risking partial deletion of anything else.
+pub fn migrate_legacy_cache(legacy: &std::path::Path, current: &std::path::Path) {
+    if !legacy.is_dir() || legacy == current {
         return;
     }
-    #[cfg(feature = "profiling")]
-    crate::profiling::tracing::record_file(
-        crate::profiling::tracing::FileOp::Write,
-        final_path.display().to_string(),
-        bytes.len(),
-        start.elapsed(),
+    let moved = migrate_tree(legacy, current);
+    log::info!(
+        "[image_cache] migrated {moved} cached file(s) from {} to {}",
+        legacy.display(),
+        current.display()
     );
-    match std::fs::rename(&tmp_path, &final_path) {
-        Ok(()) => {}
-        // Windows refuses to overwrite an existing file — replace it.
-        Err(_) if final_path.exists() => {
-            let _ = std::fs::remove_file(&final_path);
-            if let Err(e) = std::fs::rename(&tmp_path, &final_path) {
-                log::warn!("[image_cache] disk rename failed: {}", e);
-                let _ = std::fs::remove_file(&tmp_path);
+}
+
+fn migrate_tree(from_root: &std::path::Path, to_root: &std::path::Path) -> usize {
+    let mut moved = 0;
+    let mut dirs = vec![std::path::PathBuf::new()];
+    while let Some(rel) = dirs.pop() {
+        let from_dir = from_root.join(&rel);
+        let Ok(entries) = std::fs::read_dir(&from_dir) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let rel_child = rel.join(entry.file_name());
+            let from = from_root.join(&rel_child);
+            let to = to_root.join(&rel_child);
+            if from.is_dir() {
+                if std::fs::create_dir_all(&to).is_ok() {
+                    dirs.push(rel_child);
+                }
+                continue;
+            }
+            if !from.is_file() || to.exists() {
+                continue;
+            }
+            if let Some(parent) = to.parent() {
+                let _ = std::fs::create_dir_all(parent);
+            }
+            let ok = std::fs::rename(&from, &to).is_ok()
+                || (std::fs::copy(&from, &to).is_ok() && std::fs::remove_file(&from).is_ok());
+            if ok {
+                moved += 1;
             }
         }
-        Err(e) => {
-            log::warn!("[image_cache] disk rename failed: {}", e);
-            let _ = std::fs::remove_file(&tmp_path);
-        }
     }
+    moved
 }
 
 /// Cheap magic-byte check for the image formats Pixiv serves (JPEG/PNG/GIF/WebP).

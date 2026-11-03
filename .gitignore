@@ -1,5 +1,6 @@
-/target
-/Cargo.lock
+target/
+/.toolchain/
+/.dsh/
 *.swp
 .DS_Store
 *.token

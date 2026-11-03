@@ -4,7 +4,7 @@
 
 use crate::app::message::Message;
 use crate::theme;
-use crate::widgets::shortcuts::SHORTCUTS;
+use crate::widgets::shortcuts::shortcuts;
 
 /// The app's author (matches the git identity / repo ownership).
 const AUTHOR: &str = "yun (yun@yun.ng)";
@@ -59,15 +59,15 @@ pub fn help_screen(t: &iced::Theme) -> iced::Element<'static, Message> {
         })
         .collect();
 
-    let shortcut_rows: Vec<iced::Element<'static, Message>> = SHORTCUTS
+    let shortcut_rows: Vec<iced::Element<'static, Message>> = shortcuts()
         .iter()
         .map(|(key, action)| {
             iced::widget::row![
-                iced::widget::text((*key).to_string())
+                iced::widget::text(key.clone())
                     .size(12)
                     .color(theme::accent(t))
                     .width(iced::Length::Fixed(150.0)),
-                iced::widget::text((*action).to_string()).size(12),
+                iced::widget::text(*action).size(12),
             ]
             .spacing(8)
             .into()

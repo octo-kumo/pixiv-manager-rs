@@ -1063,8 +1063,9 @@ mod tests {
         let mut state = AppState::default();
         state.active_tab = Tab::Recommend;
         state.tabs.recommend.illustrations = vec![a, b, c];
-        crate::app::update::update(&mut state, Message::FilterModeChanged(FilterMode::Query));
-        crate::app::update::update(
+        let _ =
+            crate::app::update::update(&mut state, Message::FilterModeChanged(FilterMode::Query));
+        let _ = crate::app::update::update(
             &mut state,
             Message::SearchTextChanged("cat order:views".into()),
         );
@@ -1075,18 +1076,19 @@ mod tests {
         assert!(state.tabs.recommend.filters.search_text.is_empty());
 
         // Removing the `cat` chip leaves only the order token: everything shows.
-        crate::app::update::update(&mut state, Message::QueryTokenRemoved(0));
+        let _ = crate::app::update::update(&mut state, Message::QueryTokenRemoved(0));
         assert_eq!(state.tabs.recommend.filters.query_text, "order:views");
         assert_eq!(state.tabs.recommend.filtered.len(), 3);
 
         // Clearing keeps the mode.
-        crate::app::update::update(&mut state, Message::ResetFilters);
+        let _ = crate::app::update::update(&mut state, Message::ResetFilters);
         assert_eq!(state.tabs.recommend.filters.mode, FilterMode::Query);
         assert!(state.tabs.recommend.filters.query_text.is_empty());
 
         // Back to Classic: the classic search box works again.
-        crate::app::update::update(&mut state, Message::FilterModeChanged(FilterMode::Classic));
-        crate::app::update::update(&mut state, Message::SearchTextChanged("dog".into()));
+        let _ =
+            crate::app::update::update(&mut state, Message::FilterModeChanged(FilterMode::Classic));
+        let _ = crate::app::update::update(&mut state, Message::SearchTextChanged("dog".into()));
         assert_eq!(state.tabs.recommend.filtered.len(), 1);
     }
 }

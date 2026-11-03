@@ -45,13 +45,9 @@ pub(super) fn resolve_cookie_path(state: &AppState) -> Option<PathBuf> {
     }
     #[cfg(not(feature = "test-util"))]
     {
-        if let Some(config) = crate::io::config::config_path() {
-            if let Some(dir) = config.parent() {
-                let candidate = dir.join("bilibili_cookies.txt");
-                if candidate.is_file() {
-                    return Some(candidate);
-                }
-            }
+        let candidate = crate::io::paths::AppPaths::discover().bilibili_cookie_file();
+        if candidate.is_file() {
+            return Some(candidate);
         }
         let cwd = PathBuf::from("bilibili_cookies.txt");
         if cwd.is_file() {
