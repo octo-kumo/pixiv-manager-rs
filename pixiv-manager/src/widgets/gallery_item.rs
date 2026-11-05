@@ -55,53 +55,38 @@ pub fn gallery_item<'a>(
         .into()
     };
 
-    // "Downloaded to disk" checkmark (top-left corner).
-    let check: iced::Element<'_, Message> = if downloaded {
-        iced::widget::container(
-            iced::widget::text("✓")
-                .size(text.author_size())
-                .color(iced::Color::WHITE),
-        )
-        .padding(iced::Padding::from([1, 4]))
-        .style(|_| iced::widget::container::Style {
-            background: Some(iced::Background::Color(iced::Color::from_rgba(
-                0.2, 0.7, 0.3, 0.85,
-            ))),
-            border: iced::Border {
-                radius: 3.0.into(),
-                ..Default::default()
-            },
-            ..Default::default()
-        })
-        .into()
-    } else {
-        iced::widget::text("").into()
-    };
-
-    // Provider badge (top-right): marks non-Pixiv tiles in the mixed tabs.
-    let badge_label = crate::media::provider_of(id).badge();
-    let badge: iced::Element<'_, Message> = match badge_label {
-        Some(label) => iced::widget::container(
-            iced::widget::text(label)
-                .size(text.secondary_size())
-                .color(iced::Color::WHITE),
-        )
-        .padding(iced::Padding::from([1, 5]))
-        .style(|_| iced::widget::container::Style {
-            background: Some(iced::Background::Color(iced::Color::from_rgba(
-                0.0, 0.0, 0.0, 0.65,
-            ))),
-            border: iced::Border {
-                radius: 3.0.into(),
-                ..Default::default()
-            },
-            ..Default::default()
-        })
-        .into(),
-        None => iced::widget::text("").into(),
-    };
-
-    let info = illust_info::illust_info(illust, text);
+    // Overlay chrome: translucent chips along the top (downloaded, page
+    // count, R-18/AI, provider) and the info block along the bottom. Both
+    // are tinted from the thumbnail's average color (`text.avg`).
+    let chips = illust_info::corner_chips(illust, text, downloaded, Some(width));
+    // The resting bar is the *base* of the hover widget and is drawn
+    // unconditionally, so it can never be squeezed out by the expanded
+    // details. The details layer is bottom-anchored directly above the bar
+    // (its height is budgeted to the tile height inside `details_block`), so
+    // the bar keeps its exact position while hovered. `hover` only draws the
+    // top layer while the cursor is over the base, which fills the tile.
+    let bar_gap = illust_info::resting_bar_height(text);
+    let info = iced::widget::hover(
+        iced::widget::container(illust_info::info_block(illust, text, Some(width)))
+            .width(iced::Length::Fill)
+            .height(iced::Length::Fill)
+            .align_bottom(iced::Length::Fill),
+        iced::widget::container(illust_info::details_block(
+            illust,
+            text,
+            Some(width),
+            height,
+        ))
+        .width(iced::Length::Fill)
+        .height(iced::Length::Fill)
+        .align_bottom(iced::Length::Fill)
+        .padding(iced::Padding {
+            top: 0.0,
+            right: 0.0,
+            bottom: bar_gap,
+            left: 0.0,
+        }),
+    );
 
     // Aggregated download progress (bottom edge): a thin bar tracking the
     // downloader's overall multi-page fraction while the item is in flight.
@@ -148,21 +133,10 @@ pub fn gallery_item<'a>(
                 .into(),
         );
     }
+    layers.push(info);
     layers.push(
-        iced::widget::container(check)
+        iced::widget::container(chips)
             .align_top(iced::Length::Fill)
-            .align_left(iced::Length::Fill)
-            .into(),
-    );
-    layers.push(
-        iced::widget::container(badge)
-            .align_top(iced::Length::Fill)
-            .align_right(iced::Length::Fill)
-            .into(),
-    );
-    layers.push(
-        iced::widget::container(info)
-            .align_bottom(iced::Length::Fill)
             .into(),
     );
     layers.push(progress);

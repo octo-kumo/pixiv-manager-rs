@@ -83,9 +83,11 @@ pub fn settings_screen(state: &AppState) -> iced::Element<'_, Message> {
             checkbox_row("Bookmarks / views", state.settings.tile_rows.counts, |on| {
                 Message::TileRowsChanged(crate::app::state::TileRowKey::Counts, on)
             },),
-            checkbox_row("Id / size / date", state.settings.tile_rows.meta, |on| {
-                Message::TileRowsChanged(crate::app::state::TileRowKey::Meta, on)
-            },),
+            checkbox_row(
+                "Id / size / date (hover)",
+                state.settings.tile_rows.meta,
+                |on| Message::TileRowsChanged(crate::app::state::TileRowKey::Meta, on),
+            ),
             checkbox_row(
                 "Badges (R-18 / AI / pages)",
                 state.settings.tile_rows.badges,
@@ -544,19 +546,19 @@ fn mode_btn(
         .into()
 }
 
-/// Three-button tile-text style selector: Default / Invert / Background.
+/// Three-button tile-text style selector: Adaptive / Invert / Solid.
 fn text_style_selector(
     style: crate::widgets::illust_info::GalleryTextStyle,
 ) -> iced::Element<'static, Message> {
     use crate::widgets::illust_info::GalleryTextStyle as Style;
     iced::widget::row![
-        mode_btn("Default", style == Style::Default, || {
+        mode_btn("Adaptive", style == Style::Default, || {
             Message::GalleryTextStyleChanged(Style::Default)
         }),
         mode_btn("Invert", style == Style::Invert, || {
             Message::GalleryTextStyleChanged(Style::Invert)
         }),
-        mode_btn("Background", style == Style::Background, || {
+        mode_btn("Solid", style == Style::Background, || {
             Message::GalleryTextStyleChanged(Style::Background)
         }),
     ]

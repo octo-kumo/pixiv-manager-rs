@@ -1,17 +1,22 @@
-//! A GPU-blurred image tile for the "blur R-18" option, built on iced's
-//! custom shader widget (`iced::widget::shader`).
+//! A censored image tile for the "blur R-18" option, built on iced's custom
+//! shader widget (`iced::widget::shader`).
 //!
-//! The thumbnail is drawn by a WGSL shader applying a 2D 5×5
-//! linear-sampling Gaussian (25 taps). The blur radius is **animated**: the
-//! widget's own tree state eases 0 ↔ [`MAX_RADIUS`] as the cursor enters or
-//! leaves the tile, requesting redraw frames through the app's frame gate
-//! until it settles. The blurred layer replaces the parallax image on tiles
-//! it covers and shows the same centered cover crop (so the un-blurred end
-//! state matches the tile at rest).
+//! The blur itself is a real Gaussian, not a sparse in-shader approximation
+//! (which produced echoes and ringing at large radii): each thumbnail is
+//! blurred once on the CPU into a small, smooth copy, and the shader only
+//! crossfades between the sharp and the pre-blurred texture. Two texture
+//! samples per pixel, and the blur is as smooth as the halo radius asks for.
 //!
-//! GPU resources (textures + per-radius uniforms/bind groups) are cached in
+//! The censor amount is **animated**: the widget's own tree state eases
+//! 0 ↔ [`MAX_RADIUS`] as the cursor enters or leaves the tile, requesting
+//! redraw frames through the app's frame gate until it settles. The censored
+//! layer replaces the parallax image on the tiles it covers and shows the
+//! same centered cover crop (so the un-blurred end state matches the tile at
+//! rest).
+//!
+//! GPU resources (two textures + per-fade uniforms/bind groups) are cached in
 //! the shared [`BlurRenderer`] pipeline, keyed by image handle id and a
-//! quantized radius; `trim` clears them (iced calls it each frame end).
+//! quantized fade; `trim` clears them (iced calls it each frame end).
 
 use iced::wgpu;
 use iced::wgpu::util::{DeviceExt, TextureDataOrder};
@@ -23,6 +28,16 @@ use std::sync::{Arc, Mutex, OnceLock};
 /// The fully-blurred radius (screen px) used for R-18 tiles.
 pub const MAX_RADIUS: f32 = 14.0;
 
+/// Maximum dimension of the pre-blurred censor texture. A blurred image is
+/// low-frequency, so it can be generated at this size and upscaled by the
+/// GPU: a 540 px thumbnail needs only a ~160 px blurred copy.
+const BLUR_TEXTURE_MAX: u32 = 160;
+
+/// The visible full-strength Gaussian sigma as a fraction of the tile
+/// (1/24 of the tile's larger side): strong enough to obscure an illustration
+/// while keeping the composition recognisable.
+const BLUR_SIGMA_FRACTION: f32 = 1.0 / 24.0;
+
 /// Per-tick easing toward the target radius (a 16 ms tick → ~200 ms
 /// transition, honoring the configured fps limit via the animation gate).
 const ANIM_DECAY: f32 = 0.25;
@@ -31,44 +46,88 @@ const SETTLE_EPS: f32 = 0.25;
 
 // ── Decoded-RGBA cache ─────────────────────────────────────────────────
 
-/// Decoded RGBA8 pixels: `([width, height], bytes)`.
-type Pixels = Arc<([u32; 2], Vec<u8>)>;
+/// One decoded thumbnail plus its pre-blurred censoring copy.
+#[derive(Debug)]
+struct Decoded {
+    /// `[width, height]` of the sharp texture.
+    size: [u32; 2],
+    /// RGBA8 pixels of the sharp thumbnail.
+    sharp: Vec<u8>,
+    /// The pre-blurred censor copy: `([width, height], RGBA8)`.
+    blurred: ([u32; 2], Vec<u8>),
+}
+
+type Pixels = Arc<Decoded>;
 
 static PIXEL_CACHE: OnceLock<Mutex<HashMap<iced::advanced::image::Id, Pixels>>> = OnceLock::new();
 
-/// Decode the handle's image into RGBA8 pixels, cached per handle id. The
-/// decode runs on the UI thread when a blurred tile first appears (small
-/// thumbnails — a millisecond or two); every later frame reuses the cache.
+/// Decode the handle's image into RGBA8 pixels and pre-blur it, cached per
+/// handle id. The work runs on the UI thread when a censored tile first
+/// appears (small thumbnails — a millisecond or two); every later frame
+/// reuses the cache.
 fn pixels_of(handle: &iced::widget::image::Handle) -> Option<Pixels> {
     let cache = PIXEL_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
     let id = handle.id();
     if let Some(hit) = cache.lock().unwrap_or_else(|e| e.into_inner()).get(&id) {
         return Some(hit.clone());
     }
-    let decoded: Pixels = match handle {
+    let (size, sharp): ([u32; 2], Vec<u8>) = match handle {
         iced::widget::image::Handle::Rgba {
             width,
             height,
             pixels,
             ..
-        } => Arc::new(([*width, *height], pixels.to_vec())),
+        } => ([*width, *height], pixels.to_vec()),
         iced::widget::image::Handle::Bytes(_, bytes) => {
             let img = image::load_from_memory(bytes).ok()?;
             let rgba = img.to_rgba8();
-            Arc::new(([rgba.width(), rgba.height()], rgba.into_raw()))
+            ([rgba.width(), rgba.height()], rgba.into_raw())
         }
         iced::widget::image::Handle::Path(_, path) => {
             let bytes = std::fs::read(path).ok()?;
             let img = image::load_from_memory(&bytes).ok()?;
             let rgba = img.to_rgba8();
-            Arc::new((rgba.dimensions().into(), rgba.into_raw()))
+            ([rgba.width(), rgba.height()], rgba.into_raw())
         }
     };
+    let blurred = blurred_of(size, &sharp)?;
+    let decoded = Arc::new(Decoded {
+        size,
+        sharp,
+        blurred,
+    });
     cache
         .lock()
         .unwrap_or_else(|e| e.into_inner())
         .insert(id, decoded.clone());
     Some(decoded)
+}
+
+/// Pre-blur a decoded thumbnail into a small, smooth (almost-Gaussian) RGBA
+/// copy used as the censoring layer. The image is first downscaled (a blur is
+/// low-frequency, so the display never needs the full resolution) and then
+/// filtered with `image`'s three-box Gaussian approximation, which is O(px)
+/// and visually indistinguishable from a true Gaussian at these radii.
+fn blurred_of(size: [u32; 2], sharp: &[u8]) -> Option<([u32; 2], Vec<u8>)> {
+    let (w, h) = (size[0], size[1]);
+    if w == 0 || h == 0 {
+        return None;
+    }
+    let rgba = image::RgbaImage::from_raw(w, h, sharp.to_vec())?;
+    let max = w.max(h);
+    let scale = (BLUR_TEXTURE_MAX as f32 / max as f32).min(1.0);
+    let bw = ((w as f32 * scale).round() as u32).max(1);
+    let bh = ((h as f32 * scale).round() as u32).max(1);
+    let small = if (bw, bh) == (w, h) {
+        rgba
+    } else {
+        image::imageops::resize(&rgba, bw, bh, image::imageops::FilterType::Triangle)
+    };
+    // Sigma relative to the texture so the on-screen blur scales with the
+    // tile (a 200 px tile gets sigma ≈ 8 px, a 400 px tile ≈ 17 px).
+    let sigma = (bw.max(bh) as f32 * BLUR_SIGMA_FRACTION).max(0.5);
+    let blurred = image::imageops::fast_blur(&small, sigma);
+    Some(([blurred.width(), blurred.height()], blurred.into_raw()))
 }
 
 // ── Widget program ─────────────────────────────────────────────────────
@@ -169,7 +228,7 @@ impl shader::Program<crate::app::message::Message> for BlurProgram {
         BlurPrimitive {
             id: self.id,
             pixels: self.pixels.clone(),
-            size: self.pixels.0,
+            size: self.pixels.size,
             bounds_size: [bounds.width.max(1.0), bounds.height.max(1.0)],
             radius: radius.max(0.0),
             fade,
@@ -209,13 +268,26 @@ pub struct BlurRenderer {
     bind_layout: wgpu::BindGroupLayout,
     pipeline: wgpu::RenderPipeline,
     sampler: wgpu::Sampler,
-    /// Uploaded textures, keyed by image handle id.
-    textures: HashMap<iced::advanced::image::Id, wgpu::TextureView>,
-    /// Uniform buffer + bind group per (texture id, quantized sigma).
+    /// Uploaded textures (sharp + pre-blurred), keyed by image handle id.
+    textures: HashMap<iced::advanced::image::Id, Views>,
+    /// Uniform buffer + bind group per (texture id, quantized fade).
     bindings: HashMap<u64, Binding>,
+    /// Textures/bindings used since the last `trim`, so the per-frame trim
+    /// only evicts data that is actually gone from the screen instead of
+    /// re-uploading every censored tile every frame.
+    used_textures: std::collections::HashSet<iced::advanced::image::Id>,
+    used_bindings: std::collections::HashSet<u64>,
 }
 
-/// The per-(texture, blur-level) GPU binding.
+/// The two texture views a censored tile samples: the sharp thumbnail and its
+/// pre-blurred censor copy.
+#[derive(Debug)]
+struct Views {
+    sharp: wgpu::TextureView,
+    blurred: wgpu::TextureView,
+}
+
+/// The per-(texture, fade-level) GPU binding.
 #[derive(Debug)]
 pub struct Binding {
     /// The uniform block backing `group`. The bind group holds its own
@@ -226,36 +298,30 @@ pub struct Binding {
 }
 
 /// The binding-cache key: the image handle id (its debug form, hashed) XORed
-/// with the quantized sigma in the high bits. Radius quantization (½ px
+/// with the quantized censor amount in the high bits. Quantization (½ px
 /// steps) keeps an animated transition within a small, bounded set of
 /// buffers.
-fn binding_key(id: iced::advanced::image::Id, sigma: u32) -> u64 {
+fn binding_key(id: iced::advanced::image::Id, level: u32) -> u64 {
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     std::hash::Hash::hash(&id, &mut hasher);
     let hashed = std::hash::Hasher::finish(&hasher);
-    (hashed & 0x0000_0000_FFFF_FFFF) | ((sigma as u64) << 32)
+    (hashed & 0x0000_0000_FFFF_FFFF) | ((level as u64) << 32)
 }
 
-/// The classic linear-sampling 9-tap Gaussian positions (in sigma units);
-/// applied on both axes with the bilinear trick → 25 samples.
-const TAPS: [f32; 5] = [0.0, 1.3846, -1.3846, 3.2308, -3.2308];
-const TAP_WEIGHTS: [f32; 5] = [0.2270, 0.3162, 0.3162, 0.0703, 0.0703];
-
-/// The uniform block (144 bytes): 5 tap offsets, 5 tap weights, then
-/// `(1/w, 1/h, region_w, region_h)` and the blur-layer fade alpha.
-const UNIFORM_SIZE: u64 = 144;
+/// The uniform block (32 bytes): the cover region `(region_w, region_h)` and
+/// the censor-layer fade alpha.
+const UNIFORM_SIZE: u64 = 32;
 
 const WGSL: &str = r#"
 struct Params {
-    offsets: array<vec4<f32>, 5>,  // .x = texel offset (used on both axes)
-    weights: array<vec4<f32>, 2>,  // w0..w3, then w4
-    texel: vec4<f32>,              // (1/w, 1/h, region_w, region_h)
-    fade: vec4<f32>,               // x: layer alpha (the un-blur crossfade)
+    region: vec4<f32>, // .z/.w = centered cover region of the source
+    fade: vec4<f32>,   // .x = censor alpha (1 = blurred, 0 = sharp)
 }
 
 @group(0) @binding(0) var t_sampler: sampler;
-@group(0) @binding(1) var t_texture: texture_2d<f32>;
-@group(0) @binding(2) var<uniform> params: Params;
+@group(0) @binding(1) var t_sharp: texture_2d<f32>;
+@group(0) @binding(2) var t_blurred: texture_2d<f32>;
+@group(0) @binding(3) var<uniform> params: Params;
 
 struct VsOut {
     @builtin(position) pos: vec4<f32>,
@@ -284,20 +350,10 @@ fn vs(@builtin(vertex_index) i: u32) -> VsOut {
 fn fs(in: VsOut) -> @location(0) vec4<f32> {
     // Centered cover crop: map the tile's [0,1] uv into the sub-region of
     // the source that fills the tile without distortion.
-    let uv = vec2<f32>(0.5) + (in.uv - 0.5) * params.texel.zw;
-
-    var sum = vec4<f32>(0.0);
-    for (var j = 0u; j < 5u; j++) {
-        for (var i = 0u; i < 5u; i++) {
-            let w = params.weights[i / 4u][i % 4u] * params.weights[j / 4u][j % 4u];
-            let off = vec2<f32>(
-                params.offsets[i].x * params.texel.x,
-                params.offsets[j].x * params.texel.y,
-            );
-            sum += w * textureSample(t_texture, t_sampler, uv + off);
-        }
-    }
-    return vec4<f32>(sum.rgb, sum.a * params.fade.x);
+    let uv = vec2<f32>(0.5) + (in.uv - vec2(0.5)) * params.region.zw;
+    let sharp = textureSample(t_sharp, t_sampler, uv);
+    let blurred = textureSample(t_blurred, t_sampler, uv);
+    return vec4<f32>(mix(sharp.rgb, blurred.rgb, params.fade.x), 1.0);
 }
 "#;
 
@@ -330,6 +386,16 @@ impl Pipeline for BlurRenderer {
                 },
                 wgpu::BindGroupLayoutEntry {
                     binding: 2,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 3,
                     visibility: wgpu::ShaderStages::FRAGMENT,
                     ty: wgpu::BindingType::Buffer {
                         ty: wgpu::BufferBindingType::Uniform,
@@ -388,12 +454,21 @@ impl Pipeline for BlurRenderer {
             sampler,
             textures: HashMap::new(),
             bindings: HashMap::new(),
+            used_textures: std::collections::HashSet::new(),
+            used_bindings: std::collections::HashSet::new(),
         }
     }
 
     fn trim(&mut self) {
-        self.textures.clear();
-        self.bindings.clear();
+        // iced calls this at the end of every frame. Evict only what was not
+        // drawn during that frame; hard-clearing everything forced a texture
+        // upload for every censored tile on every frame.
+        self.textures
+            .retain(|id, _| self.used_textures.contains(id));
+        self.bindings
+            .retain(|key, _| self.used_bindings.contains(key));
+        self.used_textures.clear();
+        self.used_bindings.clear();
     }
 }
 
@@ -410,38 +485,58 @@ impl shader::Primitive for BlurPrimitive {
     ) {
         let (iw, ih) = (self.size[0].max(1), self.size[1].max(1));
 
-        // Upload the texture once per image (the pipeline cache survives
-        // frames; `trim` evicts it).
-        let view = match renderer.textures.entry(self.id) {
+        // Upload both textures once per image (the pipeline cache survives
+        // frames; `trim` evicts it). The formats match iced's image atlas for
+        // this build, so the censored layer has exactly the same brightness
+        // as the normal tile.
+        renderer.used_textures.insert(self.id);
+        let views = match renderer.textures.entry(self.id) {
             std::collections::hash_map::Entry::Occupied(occupied) => occupied.into_mut(),
             std::collections::hash_map::Entry::Vacant(slot) => {
-                let texture = device.create_texture_with_data(
-                    queue,
-                    &wgpu::TextureDescriptor {
-                        label: Some("pixiv-manager-blur-texture"),
-                        size: wgpu::Extent3d {
-                            width: iw,
-                            height: ih,
-                            depth_or_array_layers: 1,
+                let create = |label: &'static str, size: [u32; 2], data: &[u8]| {
+                    device.create_texture_with_data(
+                        queue,
+                        &wgpu::TextureDescriptor {
+                            label: Some(label),
+                            size: wgpu::Extent3d {
+                                width: size[0].max(1),
+                                height: size[1].max(1),
+                                depth_or_array_layers: 1,
+                            },
+                            mip_level_count: 1,
+                            sample_count: 1,
+                            dimension: wgpu::TextureDimension::D2,
+                            format: texture_format(),
+                            usage: wgpu::TextureUsages::TEXTURE_BINDING,
+                            view_formats: &[],
                         },
-                        mip_level_count: 1,
-                        sample_count: 1,
-                        dimension: wgpu::TextureDimension::D2,
-                        format: wgpu::TextureFormat::Rgba8UnormSrgb,
-                        usage: wgpu::TextureUsages::TEXTURE_BINDING,
-                        view_formats: &[],
-                    },
-                    TextureDataOrder::LayerMajor,
-                    &self.pixels.1,
+                        TextureDataOrder::LayerMajor,
+                        data,
+                    )
+                };
+                let sharp_texture = create(
+                    "pixiv-manager-blur-sharp",
+                    self.pixels.size,
+                    &self.pixels.sharp,
                 );
-                let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
-                slot.insert(view)
+                let blurred_texture = create(
+                    "pixiv-manager-blur-blurred",
+                    self.pixels.blurred.0,
+                    &self.pixels.blurred.1,
+                );
+                let views = Views {
+                    sharp: sharp_texture.create_view(&wgpu::TextureViewDescriptor::default()),
+                    blurred: blurred_texture.create_view(&wgpu::TextureViewDescriptor::default()),
+                };
+                slot.insert(views)
             }
         };
+        let _ = (iw, ih);
 
-        // The per-sigma uniform + bind group (radius quantized to ½ px so
-        // an animated transition reuses a small, bounded set of buffers).
-        let key = binding_key(self.id, sigma_key(self.radius));
+        // The per-fade uniform + bind group (the censor amount is quantized
+        // so an animated transition reuses a small, bounded set of buffers).
+        let key = binding_key(self.id, fade_key(self.radius));
+        renderer.used_bindings.insert(key);
         if !renderer.bindings.contains_key(&key) {
             let uniform = device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("pixiv-manager-blur-uniform"),
@@ -460,10 +555,14 @@ impl shader::Primitive for BlurPrimitive {
                     },
                     wgpu::BindGroupEntry {
                         binding: 1,
-                        resource: wgpu::BindingResource::TextureView(view),
+                        resource: wgpu::BindingResource::TextureView(&views.sharp),
                     },
                     wgpu::BindGroupEntry {
                         binding: 2,
+                        resource: wgpu::BindingResource::TextureView(&views.blurred),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 3,
                         resource: uniform.as_entire_binding(),
                     },
                 ],
@@ -479,7 +578,7 @@ impl shader::Primitive for BlurPrimitive {
     }
 
     fn draw(&self, renderer: &BlurRenderer, pass: &mut wgpu::RenderPass<'_>) -> bool {
-        let key = binding_key(self.id, sigma_key(self.radius));
+        let key = binding_key(self.id, fade_key(self.radius));
         let Some(binding) = renderer.bindings.get(&key) else {
             return false;
         };
@@ -490,8 +589,24 @@ impl shader::Primitive for BlurPrimitive {
     }
 }
 
-fn sigma_key(radius: f32) -> u32 {
+fn fade_key(radius: f32) -> u32 {
     (radius.max(0.0) * 2.0).round() as u32
+}
+
+/// The texture format that matches iced's image atlas in this build.
+///
+/// With iced's default `web-colors` feature gamma correction is disabled and
+/// both the atlas and the window surface are non-sRGB. An `Rgba8UnormSrgb`
+/// texture is decoded to linear space when sampled but then written to a
+/// non-sRGB target unchanged, which made the censored tile render visibly
+/// darker than the sharp image next to it (and brighten as it un-blurred).
+/// Follow the renderer's gamma setting instead of hard-coding one format.
+fn texture_format() -> wgpu::TextureFormat {
+    if iced::advanced::graphics::color::GAMMA_CORRECTION {
+        wgpu::TextureFormat::Rgba8UnormSrgb
+    } else {
+        wgpu::TextureFormat::Rgba8Unorm
+    }
 }
 
 impl BlurPrimitive {
@@ -510,43 +625,17 @@ impl BlurPrimitive {
         ]
     }
 
-    /// The blur sigma in SOURCE texels that reads as `radius` screen px.
-    fn sigma_texels(&self) -> f32 {
-        if self.radius <= 0.0 {
-            return 0.0;
-        }
-        let (iw, ih) = (self.size[0] as f32, self.size[1] as f32);
-        let scale = (self.bounds_size[0] / iw).max(self.bounds_size[1] / ih);
-        // One source texel spans `scale` screen px along the displayed axis
-        // (the cover scale is uniform; the tile may crop the other axis).
-        let texel_screen_px = scale.max(0.25);
-        (self.radius / texel_screen_px).max(0.0)
-    }
-
-    /// The 128-byte uniform block for the current radius/crop.
+    /// The 32-byte uniform block for the current cover crop + fade.
     ///
-    /// WGSL uniform layout (16-byte strides!): `offsets[5]` occupies bytes
-    /// 0–80 — each array element is a vec4, so only the `.x` lane of each is
-    /// used; `weights[2]` is bytes 80–112; `texel` is bytes 112–128. Writing
-    /// the taps as packed f32s instead left the GPU reading zero weights —
-    /// the shader summed to transparent and the tile rendered as a grey
-    /// panel (the "grey rectangle, no blur" bug).
+    /// WGSL layout (16-byte strides): `region: vec4` occupies bytes 0–16
+    /// (only `.z`/`.w` are used — the cover region), then `fade: vec4` at
+    /// bytes 16–32 (only `.x` — the censor alpha).
     fn uniform(&self) -> [u8; UNIFORM_SIZE as usize] {
         let mut data = [0.0f32; UNIFORM_SIZE as usize / 4];
-        let sigma = self.sigma_texels();
-        for (i, tap) in TAPS.iter().enumerate() {
-            data[i * 4] = tap * sigma;
-        }
-        for (i, w) in TAP_WEIGHTS.iter().enumerate() {
-            data[20 + i] = *w;
-        }
-        let texel = [1.0 / self.size[0] as f32, 1.0 / self.size[1] as f32];
         let region = self.cover();
-        data[28] = texel[0];
-        data[29] = texel[1];
-        data[30] = region[0];
-        data[31] = region[1];
-        data[32] = self.fade.clamp(0.0, 1.0);
+        data[2] = region[0];
+        data[3] = region[1];
+        data[4] = self.fade.clamp(0.0, 1.0);
         let mut bytes = [0u8; UNIFORM_SIZE as usize];
         for (i, v) in data.iter().enumerate() {
             bytes[i * 4..(i + 1) * 4].copy_from_slice(&v.to_ne_bytes());
@@ -589,7 +678,11 @@ mod tests {
         let id = iced::widget::image::Handle::from_bytes(vec![0u8]).id();
         BlurPrimitive {
             id,
-            pixels: Arc::new(([64, 64], vec![0u8; 64 * 64 * 4])),
+            pixels: Arc::new(Decoded {
+                size: [64, 64],
+                sharp: vec![0u8; 64 * 64 * 4],
+                blurred: ([8, 8], vec![0u8; 8 * 8 * 4]),
+            }),
             size: [64, 64],
             bounds_size: [200.0, 200.0],
             radius,
@@ -597,72 +690,86 @@ mod tests {
         }
     }
 
-    /// Regression for the "grey rectangle, no blur" bug: the WGSL uniform
-    /// struct lays `array<vec4<f32>, 5>` out at byte 0 with a 16-byte stride
-    /// per element. Packing the taps and weights back-to-back (5 floats for
-    /// offsets, 5 for weights) made the GPU read zero weights — every blur
-    /// sum was transparent and the tile fell back to the panel background.
+    fn float_at(p: &BlurPrimitive, i: usize) -> f32 {
+        let bytes = p.uniform();
+        f32::from_ne_bytes(bytes[i * 4..(i + 1) * 4].try_into().unwrap())
+    }
+
     #[test]
     fn uniform_matches_the_wgsl_layout() {
-        let bytes = primitive_with_fade(MAX_RADIUS, 1.0).uniform();
-        let f = |i: usize| f32::from_ne_bytes(bytes[i * 4..(i + 1) * 4].try_into().unwrap());
-
-        // offsets[i] lives in vec4 element i (float index i * 4).
-        let sigma = primitive_with_fade(MAX_RADIUS, 1.0).sigma_texels();
-        for (i, tap) in TAPS.iter().enumerate() {
-            assert_eq!(f(i * 4), tap * sigma, "offset tap {i} at float {}", i * 4);
-        }
-        // weights[2] occupies floats 20..28 (bytes 80..112).
-        for (i, w) in TAP_WEIGHTS.iter().enumerate() {
-            assert_eq!(f(20 + i), *w, "weight {i} at float {}", 20 + i);
-        }
-        // texel/region occupy floats 28..32 (bytes 112..128); fade is at
-        // float 32 (bytes 128..132).
-        assert!((f(28) - 1.0 / 64.0).abs() < 1e-6, "texel.x");
-        assert!((f(29) - 1.0 / 64.0).abs() < 1e-6, "texel.y");
+        let p = primitive_with_fade(MAX_RADIUS, 1.0);
         // A square source in a square tile: the cover region is the whole
-        // image.
-        assert_eq!((f(30), f(31)), (1.0, 1.0), "cover region");
-        assert!((f(32) - 1.0).abs() < 1e-6, "fade at full censure");
-        // The unused y/z/w lanes of each vec4 element are padding (zeros):
-        // floats 1–3, 5–7, 9–11, 13–15, 17–19 (and weights[1].y–w).
-        for i in 0..36 {
-            if matches!(
-                i,
-                0 | 4 | 8 | 12 | 16 | 20 | 21 | 22 | 23 | 24 | 28 | 29 | 30 | 31 | 32
-            ) {
-                continue; // taps, weights, texel/region, fade
-            }
-            assert_eq!(f(i), 0.0, "float {i} is padding");
+        // image. `region` is the first vec4 (floats 0..4), using .z/.w.
+        assert_eq!((float_at(&p, 2), float_at(&p, 3)), (1.0, 1.0), "region");
+        assert_eq!(float_at(&p, 0), 0.0, "region.x is padding");
+        assert_eq!(float_at(&p, 1), 0.0, "region.y is padding");
+        // The censor alpha is `fade.x` (float 4 of 8).
+        assert_eq!(float_at(&p, 4), 1.0, "fade at full censure");
+        for i in [5, 6, 7] {
+            assert_eq!(float_at(&p, i), 0.0, "fade padding at float {i}");
         }
+        assert_eq!(UNIFORM_SIZE, 32, "two vec4s");
     }
 
     #[test]
-    fn sigma_scales_with_the_requested_radius() {
-        // Radius 0 is sharp (all tap offsets collapse to the center);
-        // a bigger radius widens the kernel; weights never depend on it.
-        let sharp = primitive(0.0);
-        let blurred = primitive(12.0);
-        assert_eq!(sharp.sigma_texels(), 0.0);
-        assert!(blurred.sigma_texels() > 0.0);
-
-        let f = |p: &BlurPrimitive, i: usize| {
-            f32::from_ne_bytes(p.uniform()[i * 4..(i + 1) * 4].try_into().unwrap())
-        };
-        for i in 0..5 {
-            assert_eq!(tap_offset(&sharp, i), 0.0, "sharp offset tap {i}");
-        }
-        // The fade is passed through to the uniform verbatim: radius 0 →
-        // transparent (the parallax shows), full blur → opaque.
-        let opaque = primitive_with_fade(MAX_RADIUS, 1.0);
-        assert_eq!(f(&opaque, 32), 1.0);
-        let transparent = primitive_with_fade(0.0, 0.0);
-        assert_eq!(f(&transparent, 32), 0.0);
+    fn texture_format_matches_the_renderer_gamma_mode() {
+        // Regression: the sRGB format in a non-sRGB pipeline darkened every
+        // censored tile. The format must follow iced's gamma correction.
+        assert_eq!(
+            texture_format().is_srgb(),
+            iced::advanced::graphics::color::GAMMA_CORRECTION
+        );
     }
 
-    /// The x-lane of tap `i` in the uniform block.
-    fn tap_offset(p: &BlurPrimitive, tap: usize) -> f32 {
-        let bytes = p.uniform();
-        f32::from_ne_bytes(bytes[tap * 4..(tap + 1) * 4].try_into().unwrap())
+    #[test]
+    fn blurred_copy_is_small_and_smooth() {
+        // 320×320, left half black, right half white.
+        let (w, h) = (320u32, 320u32);
+        let mut sharp = vec![0u8; (w * h * 4) as usize];
+        for y in 0..h {
+            for x in 0..w {
+                let i = ((y * w + x) * 4) as usize;
+                let v = if x < w / 2 { 0 } else { 255 };
+                sharp[i..i + 3].copy_from_slice(&[v, v, v]);
+                sharp[i + 3] = 255;
+            }
+        }
+        let ([bw, bh], blurred) = blurred_of([w, h], &sharp).expect("blur");
+        assert_eq!(
+            [bw, bh],
+            [BLUR_TEXTURE_MAX, BLUR_TEXTURE_MAX],
+            "the censor copy is downscaled to the blur-texture cap"
+        );
+        // A real Gaussian has a gradual edge, not a hard step. The original
+        // boundary (x = w/2) sits at the middle of the downscaled copy.
+        let row = bh as usize / 2;
+        let border = bw as usize / 2;
+        let px = |x: usize| blurred[(row * bw as usize + x) * 4] as i32;
+        assert!(px(border - 10) < 100, "dark side is blurred");
+        assert!(px(border + 10) > 155, "light side is blurred");
+        let mid = px(border);
+        assert!(
+            (20..235).contains(&mid),
+            "edge is gradual, not stepped: {mid}"
+        );
+        let soft = (border - 8..border + 9)
+            .filter(|x| (5..250).contains(&px(*x)))
+            .count();
+        assert!(soft >= 5, "only {soft} soft pixels across the edge");
+    }
+
+    #[test]
+    fn cover_crop_centers_the_image() {
+        let p = primitive(MAX_RADIUS);
+        assert_eq!(p.cover(), [1.0, 1.0]);
+        let mut wide = primitive(MAX_RADIUS);
+        wide.size = [400, 200];
+        assert_eq!(wide.cover(), [0.5, 1.0]);
+    }
+
+    #[test]
+    fn fade_is_written_to_the_uniform() {
+        assert_eq!(float_at(&primitive_with_fade(MAX_RADIUS, 1.0), 4), 1.0);
+        assert_eq!(float_at(&primitive_with_fade(0.0, 0.0), 4), 0.0);
     }
 }
