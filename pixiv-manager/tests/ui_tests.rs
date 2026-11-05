@@ -230,9 +230,12 @@ fn gallery_click_emits_gallery_item_clicked() {
     let mut ui = simulator_with_size(view(&state));
 
     let first = state.tabs.recommend.illustrations[0].clone();
-    // The tile's id label is plain text (not a button) — clicking it opens
-    // the viewer. (The author name is now a button that opens the artist.)
-    let _ = ui.click(format!("#{}", first.id).as_str());
+    // The tile's count label is plain text (not a button) — clicking it
+    // opens the viewer. (The author name is a button that opens the artist;
+    // the id only appears in the hover details.)
+    let count =
+        pixiv_manager::widgets::illust_info::compact_count(first.total_bookmarks.unwrap_or(0));
+    let _ = ui.click(count.as_str());
     let messages: Vec<Message> = ui.into_messages().collect();
     let clicked = messages
         .iter()
@@ -1776,8 +1779,8 @@ fn mixed_bookmarks_render_tweet_tiles_with_badge() {
     let mut ui = simulator_with_size(view(&state));
     assert!(ui.find("𝕏").is_ok(), "tweet tiles carry the provider badge");
     assert!(
-        ui.find("♥14249").is_ok(),
-        "tweet tiles show likes with the heart glyph"
+        ui.find("14k").is_ok(),
+        "tweet tiles show the compact like count"
     );
 }
 
@@ -1862,10 +1865,7 @@ fn mixed_bookmarks_render_bilibili_tiles_with_badge() {
         ui.find("B").is_ok(),
         "dynamic tiles carry the provider badge"
     );
-    assert!(
-        ui.find("♥828").is_ok(),
-        "dynamic tiles show likes with the heart glyph"
-    );
+    assert!(ui.find("828").is_ok(), "dynamic tiles show the like count");
     assert!(ui.find("桌子君").is_ok(), "author name renders in the tile");
 }
 
@@ -2230,6 +2230,64 @@ fn tile_info_rows_can_be_toggled_off() {
         ui.find(author.as_str()).is_err(),
         "the author line is hidden when its row is toggled off"
     );
+}
+
+#[test]
+fn gallery_tile_hover_details_stay_above_the_resting_bar() {
+    // Regression: the hover block used to share the tile-height budget with
+    // the bottom bar, and iced's flex layout squeezed the bar to zero height
+    // on short tiles. The bar is now the always-drawn base of the `hover`
+    // widget and the details are bottom-anchored above it, so the details
+    // must always end above the bar and the bar must keep its full height.
+    init_test_env();
+    use pixiv_manager::widgets::gallery_item;
+    use pixiv_manager::widgets::illust_info::TileText;
+
+    let illusts = recommended_illusts();
+    let illust = &illusts[0];
+    let author = illust
+        .user
+        .as_ref()
+        .map(|u| u.name.clone())
+        .expect("fixture author");
+    let title = illust.title.clone().expect("fixture title");
+    let handle = iced::widget::image::Handle::from_bytes(tiny_png());
+
+    for height in [120.0, 200.0] {
+        let tile = gallery_item::gallery_item(
+            illust,
+            300.0,
+            height,
+            Some(&handle),
+            Default::default(),
+            false,
+            None,
+            TileText::default(),
+            false,
+            false,
+        );
+        let mut ui = simulator_with_size(tile);
+        let bar = ui
+            .find(author.as_str())
+            .expect("the resting bar author renders")
+            .bounds();
+        let details = ui
+            .find(title.as_str())
+            .expect("the hover title is laid out")
+            .bounds();
+        assert!(
+            bar.height > 10.0,
+            "height {height}: the bar must keep its text height, got {bar:?}"
+        );
+        assert!(
+            details.y + details.height <= bar.y + 0.5,
+            "height {height}: hover details {details:?} overlap the bar {bar:?}"
+        );
+        assert!(
+            bar.y + bar.height <= height,
+            "height {height}: the bar must stay inside the tile, got {bar:?}"
+        );
+    }
 }
 
 #[test]

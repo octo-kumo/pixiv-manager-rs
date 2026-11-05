@@ -15,7 +15,7 @@ chrono = { version = "0.4", features = ["serde"] }
 thiserror = "2"
 clap = { version = "4", features = ["derive"] }
 image = { version = "0.25", default-features = false, features = ["jpeg", "png", "gif"] }
-iced = { version = "0.14", features = ["image", "canvas", "tokio", "advanced"] }
+iced = { version = "0.14", features = ["image", "svg", "canvas", "tokio", "advanced"] }
 proptest = "1"
 criterion = "0.8"
 
